@@ -31,6 +31,7 @@ class IncidentEvidence(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     analysis_run: Mapped[AnalysisRun] = relationship(back_populates="evidence_logs")
+    log_entry: Mapped["LogEntry"] = relationship()
 
 
 class AnalysisTrace(Base):

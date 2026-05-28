@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas.analysis import AnalysisRunRead, AnalysisTraceRead
 from app.schemas.incident import IncidentCreate, IncidentRead
 from app.schemas.log_entry import LogEntryCreate, LogEntryRead
 from app.schemas.service import ServiceCreate, ServiceRead
-from app.services import incident_service, log_service, service_service
+from app.services import analysis_service, incident_service, log_service, service_service
 
 router = APIRouter()
 
@@ -69,3 +70,33 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
     return incident
+
+
+@router.post("/incidents/{incident_id}/analyze", response_model=AnalysisRunRead, status_code=status.HTTP_201_CREATED)
+def analyze_incident(incident_id: int, db: Session = Depends(get_db)):
+    incident = incident_service.get_incident(db, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    return analysis_service.analyze_incident(db, incident)
+
+
+@router.get("/incidents/{incident_id}/analysis", response_model=AnalysisRunRead)
+def get_incident_analysis(incident_id: int, db: Session = Depends(get_db)):
+    if incident_service.get_incident(db, incident_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    analysis = analysis_service.get_latest_analysis_for_incident(db, incident_id)
+    if analysis is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
+    return analysis
+
+
+@router.get("/incidents/{incident_id}/trace", response_model=list[AnalysisTraceRead])
+def get_incident_trace(incident_id: int, db: Session = Depends(get_db)):
+    if incident_service.get_incident(db, incident_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+
+    analysis = analysis_service.get_latest_analysis_for_incident(db, incident_id)
+    if analysis is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
+    return sorted(analysis.traces, key=lambda trace: trace.step_order)
