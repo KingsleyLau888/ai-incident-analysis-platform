@@ -11,3 +11,13 @@ Incident：一次线上故障，例如支付接口大量 500。
 2. 给 Service 导入 Logs
 3. 创建 Incident
 4. 后续系统会分析 Incident 关联的 Logs，判断故障类型和根因
+
+
+post/incident/{incident_id}/analyze
+1.根据incident_id查找对应的incident
+2.根据incident的service_id查找对应的服务日志
+3.rule_engine扫描日志，判断故障类型和根因
+4. evidence selection 选择命中关键词的日志作为 evidence_logs。
+5. summary_generation 生成摘要和建议。
+6. 保存 AnalysisRun 和 Trace。
+7. 返回分析结果
