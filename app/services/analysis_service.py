@@ -5,11 +5,13 @@ from app.models.analysis import AnalysisRun, AnalysisTrace, IncidentEvidence
 from app.models.incident import Incident
 from app.models.log_entry import LogEntry
 from app.rule_engine.detector import detect_issue, suggested_actions_for
+from app.services.runbook_retriever import RunbookRetriever, serialize_retrieved_chunks
 
 TRACE_STEPS = (
     "log_filtering",
     "rule_detection",
     "evidence_selection",
+    "vector_runbook_retrieval",
     "summary_generation",
 )
 
@@ -24,6 +26,12 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     )
     detection = detect_issue(logs)
     service_name = incident.service.name if incident.service else f"service-{incident.service_id}"
+    retrieved_runbook_chunks = RunbookRetriever().retrieve(
+        incident_title=incident.title,
+        service_name=service_name,
+        evidence_logs=detection.evidence_logs,
+        issue_type=detection.issue_type,
+    )
     summary = f"Detected {detection.issue_type} in {service_name} based on related error logs."
 
     analysis_run = AnalysisRun(
@@ -33,6 +41,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         root_cause_summary=summary,
         suggested_actions=suggested_actions_for(detection.issue_type),
     )
+    analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
     db.add(analysis_run)
     db.flush()
 
@@ -49,6 +58,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         "log_filtering": f"Selected {len(logs)} logs for service_id={incident.service_id}.",
         "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
         "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
+        "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks for issue_type={detection.issue_type}.",
         "summary_generation": "Generated deterministic template summary and rule-based suggested actions.",
     }
     for index, step_name in enumerate(TRACE_STEPS, start=1):
@@ -62,7 +72,10 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         )
 
     db.commit()
-    return get_analysis_run(db, analysis_run.id)
+    saved_analysis_run = get_analysis_run(db, analysis_run.id)
+    if saved_analysis_run is not None:
+        saved_analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
+    return saved_analysis_run
 
 
 def get_latest_analysis_for_incident(db: Session, incident_id: int) -> AnalysisRun | None:
