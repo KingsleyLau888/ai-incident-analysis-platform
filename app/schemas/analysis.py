@@ -25,6 +25,14 @@ class AnalysisTraceRead(BaseModel):
     created_at: datetime
 
 
+class RetrievedRunbookChunkRead(BaseModel):
+    chunk_id: str
+    source: str
+    title: str
+    content: str
+    score: float
+
+
 class AnalysisRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,3 +44,4 @@ class AnalysisRunRead(BaseModel):
     suggested_actions: str
     created_at: datetime
     evidence_logs: list[EvidenceLogRead] = []
+    retrieved_runbook_chunks: list[RetrievedRunbookChunkRead] = []

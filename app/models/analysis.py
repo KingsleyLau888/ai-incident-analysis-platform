@@ -21,6 +21,13 @@ class AnalysisRun(Base):
     evidence_logs: Mapped[list["IncidentEvidence"]] = relationship(back_populates="analysis_run")
     traces: Mapped[list["AnalysisTrace"]] = relationship(back_populates="analysis_run")
 
+    @property
+    def retrieved_runbook_chunks(self) -> list[dict]:
+        return getattr(self, "_retrieved_runbook_chunks", [])
+
+    def set_retrieved_runbook_chunks(self, chunks: list[dict]) -> None:
+        self._retrieved_runbook_chunks = chunks
+
 
 class IncidentEvidence(Base):
     __tablename__ = "incident_evidence"

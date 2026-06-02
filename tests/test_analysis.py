@@ -79,9 +79,10 @@ def test_get_trace(client: TestClient):
         "log_filtering",
         "rule_detection",
         "evidence_selection",
+        "vector_runbook_retrieval",
         "summary_generation",
     ]
-    assert [step["step_order"] for step in trace] == [1, 2, 3, 4]
+    assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5]
 
 
 def _create_incident_with_logs(
