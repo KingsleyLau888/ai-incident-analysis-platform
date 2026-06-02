@@ -23,6 +23,10 @@ class RunbookRetriever:
         self.chunks = chunks if chunks is not None else load_runbook_chunks()
         self.embedder = embedder if embedder is not None else get_embedder()
 
+    @property
+    def backend_name(self) -> str:
+        return self.embedder.name
+
     def retrieve(
         self,
         incident_title: str,

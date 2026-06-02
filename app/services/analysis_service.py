@@ -26,7 +26,8 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     )
     detection = detect_issue(logs)
     service_name = incident.service.name if incident.service else f"service-{incident.service_id}"
-    retrieved_runbook_chunks = RunbookRetriever().retrieve(
+    runbook_retriever = RunbookRetriever()
+    retrieved_runbook_chunks = runbook_retriever.retrieve(
         incident_title=incident.title,
         service_name=service_name,
         evidence_logs=detection.evidence_logs,
@@ -58,7 +59,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         "log_filtering": f"Selected {len(logs)} logs for service_id={incident.service_id}.",
         "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
         "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
-        "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks for issue_type={detection.issue_type}.",
+        "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks for issue_type={detection.issue_type}; backend={runbook_retriever.backend_name}.",
         "summary_generation": "Generated deterministic template summary and rule-based suggested actions.",
     }
     for index, step_name in enumerate(TRACE_STEPS, start=1):

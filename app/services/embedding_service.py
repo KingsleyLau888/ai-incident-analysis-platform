@@ -27,7 +27,7 @@ class SentenceTransformerEmbedder:
         except ImportError as exc:
             raise RuntimeError("sentence-transformers is not installed") from exc
 
-        self._model = SentenceTransformer(self.model_name, local_files_only=True)
+        self._model = SentenceTransformer(self.model_name)
 
     def rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
         if not documents:
@@ -45,7 +45,7 @@ class SentenceTransformerEmbedder:
 
 @dataclass
 class TfidfEmbedder:
-    name: str = "tf-idf-fallback"
+    name: str = "tfidf"
 
     def rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
         if not documents:
