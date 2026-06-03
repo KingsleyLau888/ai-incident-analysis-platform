@@ -23,6 +23,10 @@ def test_analyze_database_issue(client: TestClient):
     assert analysis["suggested_actions"] == "Check database availability, connection pool, and credentials."
     assert len(analysis["evidence_logs"]) == 1
     assert "DBConnection" in analysis["evidence_logs"][0]["log_entry"]["message"]
+    assert "payment-service is showing signs of database issue" in analysis["diagnosis_summary"]
+    assert analysis["root_cause_hypotheses"]
+    assert analysis["impact_scope"] == "Likely impact is scoped to payment-service and its directly related dependencies."
+    assert analysis["structured_suggested_actions"]
 
 
 def test_analyze_timeout_issue(client: TestClient):
@@ -83,6 +87,8 @@ def test_get_trace(client: TestClient):
         "summary_generation",
     ]
     assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5]
+    summary_step = next(step for step in trace if step["step_name"] == "summary_generation")
+    assert "mock LLM structured diagnosis" in summary_step["detail"]
 
 
 def _create_incident_with_logs(
