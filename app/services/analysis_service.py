@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.analysis import AnalysisRun, AnalysisTrace, IncidentEvidence
 from app.models.incident import Incident
 from app.models.log_entry import LogEntry
+from app.llm.mock_client import MockLLMClient
 from app.rule_engine.detector import detect_issue, suggested_actions_for
 from app.services.runbook_retriever import RunbookRetriever, serialize_retrieved_chunks
 
@@ -33,6 +34,13 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         evidence_logs=detection.evidence_logs,
         issue_type=detection.issue_type,
     )
+    structured_diagnosis = MockLLMClient().diagnose(
+        incident_title=incident.title,
+        service_name=service_name,
+        issue_type=detection.issue_type,
+        evidence_logs=detection.evidence_logs,
+        retrieved_runbook_chunks=retrieved_runbook_chunks,
+    )
     summary = f"Detected {detection.issue_type} in {service_name} based on related error logs."
 
     analysis_run = AnalysisRun(
@@ -43,6 +51,12 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         suggested_actions=suggested_actions_for(detection.issue_type),
     )
     analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
+    analysis_run.set_structured_diagnosis(
+        diagnosis_summary=structured_diagnosis.diagnosis_summary,
+        root_cause_hypotheses=structured_diagnosis.root_cause_hypotheses,
+        impact_scope=structured_diagnosis.impact_scope,
+        structured_suggested_actions=structured_diagnosis.structured_suggested_actions,
+    )
     db.add(analysis_run)
     db.flush()
 
@@ -60,7 +74,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
         "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
         "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks for issue_type={detection.issue_type}; backend={runbook_retriever.backend_name}.",
-        "summary_generation": "Generated deterministic template summary and rule-based suggested actions.",
+        "summary_generation": "Generated legacy template summary plus mock LLM structured diagnosis.",
     }
     for index, step_name in enumerate(TRACE_STEPS, start=1):
         db.add(
@@ -76,6 +90,12 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     saved_analysis_run = get_analysis_run(db, analysis_run.id)
     if saved_analysis_run is not None:
         saved_analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
+        saved_analysis_run.set_structured_diagnosis(
+            diagnosis_summary=structured_diagnosis.diagnosis_summary,
+            root_cause_hypotheses=structured_diagnosis.root_cause_hypotheses,
+            impact_scope=structured_diagnosis.impact_scope,
+            structured_suggested_actions=structured_diagnosis.structured_suggested_actions,
+        )
     return saved_analysis_run
 
 

@@ -45,3 +45,7 @@ class AnalysisRunRead(BaseModel):
     created_at: datetime
     evidence_logs: list[EvidenceLogRead] = []
     retrieved_runbook_chunks: list[RetrievedRunbookChunkRead] = []
+    diagnosis_summary: str = ""
+    root_cause_hypotheses: list[str] = []
+    impact_scope: str = ""
+    structured_suggested_actions: list[str] = []

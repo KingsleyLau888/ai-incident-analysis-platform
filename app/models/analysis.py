@@ -28,6 +28,34 @@ class AnalysisRun(Base):
     def set_retrieved_runbook_chunks(self, chunks: list[dict]) -> None:
         self._retrieved_runbook_chunks = chunks
 
+    @property
+    def diagnosis_summary(self) -> str:
+        return getattr(self, "_diagnosis_summary", "")
+
+    @property
+    def root_cause_hypotheses(self) -> list[str]:
+        return getattr(self, "_root_cause_hypotheses", [])
+
+    @property
+    def impact_scope(self) -> str:
+        return getattr(self, "_impact_scope", "")
+
+    @property
+    def structured_suggested_actions(self) -> list[str]:
+        return getattr(self, "_structured_suggested_actions", [])
+
+    def set_structured_diagnosis(
+        self,
+        diagnosis_summary: str,
+        root_cause_hypotheses: list[str],
+        impact_scope: str,
+        structured_suggested_actions: list[str],
+    ) -> None:
+        self._diagnosis_summary = diagnosis_summary
+        self._root_cause_hypotheses = root_cause_hypotheses
+        self._impact_scope = impact_scope
+        self._structured_suggested_actions = structured_suggested_actions
+
 
 class IncidentEvidence(Base):
     __tablename__ = "incident_evidence"
