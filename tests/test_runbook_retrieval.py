@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from app.services import embedding_service
+from app.services.embedding_service import get_embedder
 from app.services.runbook_chunker import load_runbook_chunks
 from app.services.runbook_retriever import RunbookRetriever
 
@@ -42,6 +44,27 @@ def test_database_incident_query_retrieves_database_runbook_chunks():
     assert any("mysql-primary" in chunk.content or "connection" in chunk.content.lower() for chunk in chunks)
 
 
+def test_default_embedding_backend_uses_tfidf(monkeypatch):
+    monkeypatch.delenv("RUNBOOK_EMBEDDING_BACKEND", raising=False)
+
+    embedder = get_embedder()
+
+    assert embedder.name == "tfidf"
+
+
+def test_sentence_transformers_backend_falls_back_when_unavailable(monkeypatch):
+    class BrokenSentenceTransformerEmbedder:
+        def __init__(self) -> None:
+            raise RuntimeError("model unavailable")
+
+    monkeypatch.setenv("RUNBOOK_EMBEDDING_BACKEND", "sentence-transformers")
+    monkeypatch.setattr(embedding_service, "SentenceTransformerEmbedder", BrokenSentenceTransformerEmbedder)
+
+    embedder = get_embedder()
+
+    assert embedder.name == "tfidf"
+
+
 def test_analyze_returns_retrieved_runbook_chunks(client: TestClient):
     incident = _create_incident_with_logs(
         client,
@@ -75,6 +98,12 @@ def test_trace_contains_vector_runbook_retrieval(client: TestClient):
     assert response.status_code == 200
     trace = response.json()
     assert "vector_runbook_retrieval" in [step["step_name"] for step in trace]
+    retrieval_step = next(step for step in trace if step["step_name"] == "vector_runbook_retrieval")
+    assert "backend=" in retrieval_step["detail"]
+    assert any(
+        backend in retrieval_step["detail"]
+        for backend in ["backend=tfidf", "backend=sentence-transformers"]
+    )
 
 
 def _create_incident_with_logs(
