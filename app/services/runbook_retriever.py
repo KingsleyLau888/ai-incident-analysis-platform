@@ -35,6 +35,9 @@ class RunbookRetriever:
         issue_type: str,
         top_k: int = 3,
     ) -> list[RetrievedRunbookChunk]:
+        if issue_type == "unknown":
+            return []
+
         query = build_runbook_query(
             incident_title=incident_title,
             service_name=service_name,

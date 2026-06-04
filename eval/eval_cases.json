@@ -1,0 +1,107 @@
+[
+  {
+    "case_id": "database-payment-mysql-timeout",
+    "service_name": "payment-service",
+    "incident_title": "Users cannot complete payments",
+    "incident_description": "Payment checkout is failing for users during card authorization.",
+    "logs": [
+      "INFO payment request started",
+      "ERROR DBConnectionTimeout when connecting to mysql-primary",
+      "ERROR payment request failed after database retry"
+    ],
+    "expected_issue_type": "database_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["DBConnectionTimeout", "mysql-primary"],
+    "expected_runbook_sources": ["database_issue.md"]
+  },
+  {
+    "case_id": "timeout-checkout-upstream",
+    "service_name": "checkout-service",
+    "incident_title": "Checkout requests are timing out",
+    "incident_description": "Checkout requests exceed their deadline when calling an upstream dependency.",
+    "logs": [
+      "INFO checkout request accepted",
+      "ERROR upstream request timed out after 30s",
+      "WARNING retry latency increased"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["timed out"],
+    "expected_runbook_sources": ["timeout_issue.md"]
+  },
+  {
+    "case_id": "auth-token-rejected",
+    "service_name": "auth-service",
+    "incident_title": "Users cannot sign in",
+    "incident_description": "Login requests fail because tokens are rejected.",
+    "logs": [
+      "INFO login request received",
+      "ERROR 401 unauthorized token rejected",
+      "ERROR auth middleware rejected credentials"
+    ],
+    "expected_issue_type": "auth_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["401", "unauthorized", "token"],
+    "expected_runbook_sources": ["auth_issue.md"]
+  },
+  {
+    "case_id": "cache-redis-connection",
+    "service_name": "cart-service",
+    "incident_title": "Cart reads are failing",
+    "incident_description": "Cart service cannot read cached cart state.",
+    "logs": [
+      "INFO cart lookup started",
+      "ERROR RedisConnection refused while reading cache",
+      "WARNING cache fallback latency high"
+    ],
+    "expected_issue_type": "cache_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["RedisConnection", "cache"],
+    "expected_runbook_sources": ["cache_issue.md"]
+  },
+  {
+    "case_id": "memory-worker-oom",
+    "service_name": "worker-service",
+    "incident_title": "Workers are restarting",
+    "incident_description": "Background workers restart repeatedly under heap pressure.",
+    "logs": [
+      "INFO batch job started",
+      "ERROR OutOfMemory heap allocation failed",
+      "ERROR worker process killed by OOM"
+    ],
+    "expected_issue_type": "memory_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["OutOfMemory", "OOM"],
+    "expected_runbook_sources": ["memory_issue.md"]
+  },
+  {
+    "case_id": "server-error-api-500",
+    "service_name": "api-service",
+    "incident_title": "API returns internal errors",
+    "incident_description": "API service returns repeated HTTP 500 responses.",
+    "logs": [
+      "INFO request handler started",
+      "ERROR 500 internal server error in request handler",
+      "ERROR failed to serialize response payload"
+    ],
+    "expected_issue_type": "server_error",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["500", "internal server error"],
+    "expected_runbook_sources": ["server_error.md"]
+  },
+  {
+    "case_id": "unknown-benign-warning",
+    "service_name": "profile-service",
+    "incident_title": "Profile page is slow",
+    "incident_description": "Profile page latency increased with no clear error signature.",
+    "logs": [
+      "INFO profile request started",
+      "WARNING profile response slower than usual",
+      "INFO profile request completed"
+    ],
+    "expected_issue_type": "unknown",
+    "expected_severity": "low",
+    "expected_evidence_keywords": [],
+    "expected_runbook_sources": []
+  }
+]
