@@ -82,6 +82,8 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
     for name, value in report["metrics"].items():
         if name == "average_latency_ms":
             lines.append(f"- {name}: {value:.2f}")
+        elif name == "failed_case_count":
+            lines.append(f"- {name}: {value}")
         else:
             lines.append(f"- {name}: {value:.2%}")
 
@@ -101,7 +103,11 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
                 f"- actual_similar_issue_types: {', '.join(result['actual_similar_issue_types']) or '(none)'}",
                 f"- evidence_recall: {result['evidence_recall']:.2%}",
                 f"- runbook_retrieval_recall: {result['runbook_retrieval_recall']:.2%}",
+                f"- runbook_top1_correct: {result['runbook_top1_correct']}",
+                f"- runbook_precision_at_3: {result['runbook_precision_at_3']:.2%}",
                 f"- similar_incident_retrieval_recall: {result['similar_incident_retrieval_recall']:.2%}",
+                f"- similar_incident_top1_correct: {result['similar_incident_top1_correct']}",
+                f"- similar_incident_precision_at_3: {result['similar_incident_precision_at_3']:.2%}",
                 f"- latency_ms: {result['latency_ms']:.2f}",
                 f"- passed: {result['passed']}",
                 "",
@@ -114,6 +120,25 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
             lines.append(f"- {result['case_id']}")
     else:
         lines.append("- None")
+
+    lines.extend(["", "## Error Analysis", ""])
+    if report["failed_cases"]:
+        for result in report["failed_cases"]:
+            lines.extend(
+                [
+                    f"### {result['case_id']}",
+                    "",
+                    f"- failure_category: {', '.join(result['failure_categories'])}",
+                    f"- expected: issue_type={result['expected_issue_type']}, severity={result['expected_severity']}, "
+                    f"runbooks={result['expected_runbook_sources']}, similar_types={result['expected_similar_issue_types']}",
+                    f"- actual: issue_type={result['actual_issue_type']}, severity={result['actual_severity']}, "
+                    f"runbooks={result['actual_runbook_sources']}, similar_types={result['actual_similar_issue_types']}",
+                    f"- possible_failure_reason: {result['possible_failure_reason']}",
+                    "",
+                ]
+            )
+    else:
+        lines.append("- No failed cases.")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -168,6 +193,14 @@ def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
     evidence_recall = _keyword_recall(case.expected_evidence_keywords, actual_evidence_messages)
     runbook_recall = _source_recall(case.expected_runbook_sources, actual_runbook_sources)
     similar_incident_recall = _source_recall(case.expected_similar_issue_types, actual_similar_issue_types)
+    runbook_top1_correct = _top1_correct(case.expected_runbook_sources, actual_runbook_sources)
+    runbook_precision_at_3 = _precision_at_k(case.expected_runbook_sources, actual_runbook_sources, 3)
+    similar_incident_top1_correct = _top1_correct(
+        case.expected_similar_issue_types, actual_similar_issue_types
+    )
+    similar_incident_precision_at_3 = _precision_at_k(
+        case.expected_similar_issue_types, actual_similar_issue_types, 3
+    )
     issue_type_match = analysis.issue_type == case.expected_issue_type
     severity_match = analysis.severity == case.expected_severity
     passed = (
@@ -176,6 +209,13 @@ def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
         and evidence_recall == 1.0
         and runbook_recall == 1.0
         and similar_incident_recall == 1.0
+    )
+    failure_categories = _failure_categories(
+        issue_type_match=issue_type_match,
+        severity_match=severity_match,
+        evidence_recall=evidence_recall,
+        runbook_recall=runbook_recall,
+        similar_incident_recall=similar_incident_recall,
     )
 
     return {
@@ -194,9 +234,15 @@ def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
         "severity_match": severity_match,
         "evidence_recall": evidence_recall,
         "runbook_retrieval_recall": runbook_recall,
+        "runbook_top1_correct": runbook_top1_correct,
+        "runbook_precision_at_3": runbook_precision_at_3,
         "similar_incident_retrieval_recall": similar_incident_recall,
+        "similar_incident_top1_correct": similar_incident_top1_correct,
+        "similar_incident_precision_at_3": similar_incident_precision_at_3,
         "latency_ms": latency_ms,
         "passed": passed,
+        "failure_categories": failure_categories,
+        "possible_failure_reason": _possible_failure_reason(failure_categories),
     }
 
 
@@ -207,10 +253,23 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         "severity_accuracy": sum(1 for result in results if result["severity_match"]) / total,
         "evidence_recall": sum(result["evidence_recall"] for result in results) / total,
         "runbook_retrieval_recall": sum(result["runbook_retrieval_recall"] for result in results) / total,
+        "runbook_top1_accuracy": sum(1 for result in results if result["runbook_top1_correct"])
+        / total,
+        "runbook_precision_at_3": sum(result["runbook_precision_at_3"] for result in results)
+        / total,
         "similar_incident_retrieval_recall": sum(
             result["similar_incident_retrieval_recall"] for result in results
         )
         / total,
+        "similar_incident_top1_accuracy": sum(
+            1 for result in results if result["similar_incident_top1_correct"]
+        )
+        / total,
+        "similar_incident_precision_at_3": sum(
+            result["similar_incident_precision_at_3"] for result in results
+        )
+        / total,
+        "failed_case_count": sum(1 for result in results if not result["passed"]),
         "average_latency_ms": sum(result["latency_ms"] for result in results) / total,
     }
 
@@ -231,12 +290,56 @@ def _source_recall(expected_sources: list[str], actual_sources: list[str]) -> fl
     return matches / len(expected_sources)
 
 
+def _top1_correct(expected: list[str], actual: list[str]) -> bool:
+    if not expected:
+        return not actual
+    return bool(actual) and actual[0] in set(expected)
+
+
+def _precision_at_k(expected: list[str], actual: list[str], k: int) -> float:
+    if not expected:
+        return 1.0 if not actual else 0.0
+    relevant = set(expected)
+    return sum(1 for item in actual[:k] if item in relevant) / k
+
+
+def _failure_categories(
+    issue_type_match: bool,
+    severity_match: bool,
+    evidence_recall: float,
+    runbook_recall: float,
+    similar_incident_recall: float,
+) -> list[str]:
+    categories: list[str] = []
+    if not issue_type_match or not severity_match:
+        categories.append("rule_detection")
+    if evidence_recall < 1.0:
+        categories.append("evidence_selection")
+    if runbook_recall < 1.0:
+        categories.append("runbook_retrieval")
+    if similar_incident_recall < 1.0:
+        categories.append("similar_incident_retrieval")
+    return categories
+
+
+def _possible_failure_reason(categories: list[str]) -> str:
+    reasons = {
+        "rule_detection": "Keyword priority or ambiguous mixed signals produced a different classification.",
+        "evidence_selection": "Expected evidence keywords were not present in the selected evidence logs.",
+        "runbook_retrieval": "The expected runbook source was missing from the retrieved top results.",
+        "similar_incident_retrieval": "The expected historical issue type was missing from the retrieved top results.",
+    }
+    return " ".join(reasons[category] for category in categories) or "No scored failure detected."
+
+
 def main() -> None:
     report = run_eval()
     print(f"Evaluated {report['total_cases']} cases")
     for name, value in report["metrics"].items():
         if name == "average_latency_ms":
             print(f"{name}: {value:.2f}")
+        elif name == "failed_case_count":
+            print(f"{name}: {value}")
         else:
             print(f"{name}: {value:.2%}")
     print(f"Wrote report to {DEFAULT_REPORT_PATH}")
