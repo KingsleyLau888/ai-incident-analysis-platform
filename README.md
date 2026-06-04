@@ -2,7 +2,7 @@
 
 面向 AIOps 场景的智能故障诊断后端系统。
 
-本项目围绕 Incident Analysis Pipeline，结合规则信号检测、证据日志提取、Runbook Retrieval、Mock LLM 结构化诊断、Trace 和离线 Eval Harness，演示一次事故从日志分析到诊断结果生成的完整后端流程。
+本项目围绕 Incident Analysis Pipeline，结合规则信号检测、证据日志提取、Runbook Retrieval、可插拔 LLM 结构化诊断、Trace 和离线 Eval Harness，演示一次事故从日志分析到诊断结果生成的完整后端流程。
 
 项目当前定位是可解释、可评测的 Incident Copilot 原型，不是完整 AIOps 平台，也不是能够自主操作生产环境的 Fully Autonomous Agent。
 
@@ -15,7 +15,7 @@
 - 使用 Rule Engine 从日志中识别故障类型。
 - 提取支持诊断结论的 Evidence Logs。
 - 检索与事故上下文相关的 Runbook Chunks。
-- 使用 Mock LLM 生成结构化诊断结果。
+- 默认使用 Mock LLM，也可选择 OpenAI-compatible Provider 生成结构化诊断结果。
 - 使用 Trace 记录分析流程。
 - 使用 Eval Harness 离线评估分析效果。
 
@@ -38,7 +38,7 @@
 - **Rule-based Signal Detection**：根据日志关键词识别数据库、超时、鉴权、缓存、内存和服务器错误等信号。
 - **Evidence Logs**：记录支持故障判断的关键日志。
 - **Runbook Retrieval**：根据事故标题、服务名、故障类型和证据日志检索相关排障文档片段。
-- **Mock LLM Structured Diagnosis**：生成诊断摘要、根因假设、影响范围和结构化建议。
+- **Pluggable LLM Structured Diagnosis**：默认使用 Mock LLM，可选 OpenAI-compatible Provider，并支持失败 fallback。
 - **Analysis Trace**：记录日志筛选、规则检测、证据选择、Runbook 检索和摘要生成步骤。
 - **Offline Eval Harness**：使用模拟事故数据评估故障类型、严重程度、证据召回和 Runbook 召回效果。
 
@@ -71,7 +71,7 @@ Rule Engine 检测 issue_type、severity 和 evidence_logs
   ↓
 Runbook Retrieval 检索相关文档片段
   ↓
-Mock LLM 生成结构化诊断
+LLM Client 生成结构化诊断
   ↓
 保存 AnalysisRun、IncidentEvidence 和 AnalysisTrace
   ↓
@@ -176,7 +176,7 @@ Demo 会自动：
 pytest
 ```
 
-测试覆盖 API、Rule Engine 分析、Runbook Retrieval、Mock LLM 结构化诊断、Trace 和 Eval Harness。
+测试覆盖 API、Rule Engine 分析、Runbook Retrieval、Mock/Fallback LLM 结构化诊断、Trace 和 Eval Harness。
 
 ## 运行离线评测
 
@@ -235,7 +235,7 @@ sentence-transformers/all-MiniLM-L6-v2
 
 ## 当前限制
 
-- 当前 LLM 是 **Mock LLM**，不会调用真实大模型 API，也不具备真实模型推理能力。
+- 默认 LLM Provider 是 **Mock LLM**；真实 OpenAI-compatible Provider 是可选能力，效果取决于所配置的模型和服务。
 - 当前系统只负责诊断、证据展示和建议，不执行自动修复、自动回滚或生产环境操作。
 - 当前 Eval Cases 和 Runbooks 均为模拟数据，评测结果不能代表真实生产事故诊断准确率。
 - 当前 Agent 能力属于受控的 Agentic Workflow / Pipeline，不是 Fully Autonomous Agent。
@@ -246,7 +246,7 @@ sentence-transformers/all-MiniLM-L6-v2
 
 ## 后续规划
 
-- 接入真实 LLM API，并要求结构化输出和证据引用。
+- 扩展更多真实 LLM Provider，并加强结构化输出和证据引用评测。
 - 为 Incident 增加时间窗口，减少无关历史日志干扰。
 - 增加更复杂的 Eval Cases、干扰文档和检索评测指标。
 - 支持 Runbook Chunk Embedding 缓存和向量数据库。
@@ -255,3 +255,20 @@ sentence-transformers/all-MiniLM-L6-v2
 - 增加人工反馈和诊断结果评估闭环。
 
 项目后续仍将保持 Copilot 定位：帮助工程师分析事故和整理建议，而不是替代工程师自动操作生产系统。
+
+## 可选真实 LLM
+
+项目默认使用 Mock LLM，因此本地运行、测试和离线评测都不依赖真实大模型 API。
+
+如需启用 OpenAI-compatible Provider，可在当前终端设置：
+
+```powershell
+$env:LLM_PROVIDER="openai_compatible"
+$env:LLM_API_KEY="<your-api-key>"
+$env:LLM_BASE_URL="https://your-provider.example/v1"
+$env:LLM_MODEL="your-model-name"
+```
+
+不要将 API Key 写入代码、README、测试文件或提交到 Git。
+
+真实 LLM 会接收 Incident、Severity、Evidence Logs、Runbook Chunks 和 Similar Incidents，并返回经过 Schema 校验的结构化诊断。如果调用失败、JSON 无法解析或 Schema 校验失败，系统会自动 fallback 到 Mock LLM，并在 Trace 中记录 `provider=mock_fallback`。

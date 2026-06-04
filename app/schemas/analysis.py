@@ -47,6 +47,12 @@ class AnalysisPlanRead(BaseModel):
     tool_steps: list[str]
 
 
+class RootCauseHypothesisRead(BaseModel):
+    cause: str
+    confidence: float
+    supporting_evidence: list[str]
+
+
 class AnalysisRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -64,6 +70,6 @@ class AnalysisRunRead(BaseModel):
         default_factory=lambda: AnalysisPlanRead(analysis_plan="", tool_steps=[])
     )
     diagnosis_summary: str = ""
-    root_cause_hypotheses: list[str] = []
+    root_cause_hypotheses: list[RootCauseHypothesisRead] = []
     impact_scope: str = ""
     structured_suggested_actions: list[str] = []

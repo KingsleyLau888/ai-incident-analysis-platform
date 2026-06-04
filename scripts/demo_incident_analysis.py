@@ -107,7 +107,16 @@ def _print_demo_report(service: dict, incident: dict, analysis: dict, trace: lis
 
     print("\n## Diagnosis Summary")
     print(analysis["diagnosis_summary"])
-    _print_section("Root Cause Hypotheses", analysis["root_cause_hypotheses"])
+    _print_section(
+        "Root Cause Hypotheses",
+        [
+            (
+                f"{hypothesis['cause']} (confidence={hypothesis['confidence']:.2f})\n"
+                f"  Evidence: {', '.join(hypothesis['supporting_evidence'])}"
+            )
+            for hypothesis in analysis["root_cause_hypotheses"]
+        ],
+    )
 
     print("\n## Impact Scope")
     print(analysis["impact_scope"])
