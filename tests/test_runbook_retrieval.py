@@ -84,6 +84,21 @@ def test_analyze_returns_retrieved_runbook_chunks(client: TestClient):
     assert any(chunk["source"] == "database_issue.md" for chunk in analysis["retrieved_runbook_chunks"])
 
 
+def test_unknown_issue_analyze_returns_no_runbook_chunks(client: TestClient):
+    incident = _create_incident_with_logs(
+        client,
+        service_name="profile-service",
+        messages=["INFO profile request completed slower than usual"],
+    )
+
+    response = client.post(f"/incidents/{incident['id']}/analyze")
+
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["issue_type"] == "unknown"
+    assert analysis["retrieved_runbook_chunks"] == []
+
+
 def test_trace_contains_vector_runbook_retrieval(client: TestClient):
     incident = _create_incident_with_logs(
         client,
