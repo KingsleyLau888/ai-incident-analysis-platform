@@ -110,5 +110,111 @@
     "expected_evidence_keywords": [],
     "expected_runbook_sources": [],
     "expected_similar_issue_types": []
+  },
+  {
+    "case_id": "hard-mixed-database-timeout-primary-timeout",
+    "service_name": "reporting-service",
+    "incident_title": "Report requests exceed their deadline",
+    "incident_description": "Requests time out while waiting for a database-backed report dependency.",
+    "logs": [
+      "INFO report generation started",
+      "ERROR request timed out while waiting for database response",
+      "WARNING database response arrived after client deadline"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["timed out"],
+    "expected_runbook_sources": ["timeout_issue.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
+  },
+  {
+    "case_id": "hard-server-error-symptom-database-root-cause",
+    "service_name": "billing-service",
+    "incident_title": "Billing API returns 500 errors",
+    "incident_description": "HTTP 500 responses appear after billing database connections fail.",
+    "logs": [
+      "ERROR 500 internal server error while processing invoice",
+      "ERROR postgres database connection failed before invoice write"
+    ],
+    "expected_issue_type": "database_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["postgres", "database connection failed"],
+    "expected_runbook_sources": ["database_issue.md"],
+    "expected_similar_issue_types": ["database_issue"]
+  },
+  {
+    "case_id": "hard-auth-with-timeout-interference",
+    "service_name": "identity-service",
+    "incident_title": "Valid users are rejected during login",
+    "incident_description": "Authentication rejects valid tokens while one downstream call is also slow.",
+    "logs": [
+      "ERROR unauthorized token rejected for valid user",
+      "WARNING audit request timed out after authentication failure"
+    ],
+    "expected_issue_type": "auth_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["unauthorized", "token rejected"],
+    "expected_runbook_sources": ["auth_issue.md"],
+    "expected_similar_issue_types": ["auth_issue"]
+  },
+  {
+    "case_id": "hard-cache-warning-not-incident",
+    "service_name": "catalog-service",
+    "incident_title": "Catalog refresh completed with warning",
+    "incident_description": "A cache warming warning was emitted but requests remained healthy.",
+    "logs": [
+      "WARNING cache warming completed slower than expected",
+      "INFO catalog requests remained healthy"
+    ],
+    "expected_issue_type": "unknown",
+    "expected_severity": "low",
+    "expected_evidence_keywords": [],
+    "expected_runbook_sources": [],
+    "expected_similar_issue_types": []
+  },
+  {
+    "case_id": "hard-memory-warning-without-oom",
+    "service_name": "search-service",
+    "incident_title": "Search memory usage warning",
+    "incident_description": "Memory usage is elevated but there are no crashes or OOM events.",
+    "logs": [
+      "WARNING memory usage reached 70 percent",
+      "INFO search requests completed successfully"
+    ],
+    "expected_issue_type": "unknown",
+    "expected_severity": "low",
+    "expected_evidence_keywords": [],
+    "expected_runbook_sources": [],
+    "expected_similar_issue_types": []
+  },
+  {
+    "case_id": "hard-unknown-error-like-wording",
+    "service_name": "notification-service",
+    "incident_title": "Notification delivery degraded",
+    "incident_description": "An unfamiliar dependency handshake failure occurred.",
+    "logs": [
+      "ERROR dependency handshake failed with code X77",
+      "WARNING notification delivery delayed"
+    ],
+    "expected_issue_type": "unknown",
+    "expected_severity": "low",
+    "expected_evidence_keywords": [],
+    "expected_runbook_sources": [],
+    "expected_similar_issue_types": []
+  },
+  {
+    "case_id": "hard-similar-incident-top3-challenge",
+    "service_name": "payment-edge-service",
+    "incident_title": "Payment edge requests fail after upstream deadline",
+    "incident_description": "Payment edge requests time out without direct database errors.",
+    "logs": [
+      "ERROR upstream request timed out after payment authorization deadline",
+      "WARNING payment edge retry exhausted"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["timed out"],
+    "expected_runbook_sources": ["timeout_issue.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
   }
 ]

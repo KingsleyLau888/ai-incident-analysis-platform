@@ -41,12 +41,20 @@ def test_run_eval_generates_metrics_and_report(tmp_path, monkeypatch):
         "severity_accuracy",
         "evidence_recall",
         "runbook_retrieval_recall",
+        "runbook_top1_accuracy",
+        "runbook_precision_at_3",
         "similar_incident_retrieval_recall",
+        "similar_incident_top1_accuracy",
+        "similar_incident_precision_at_3",
+        "failed_case_count",
         "average_latency_ms",
     }
     assert report_path.exists()
-    assert "## Metrics" in report_path.read_text(encoding="utf-8")
-    assert "similar_incident_retrieval_recall" in report_path.read_text(encoding="utf-8")
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "## Metrics" in report_text
+    assert "similar_incident_retrieval_recall" in report_text
+    assert "## Error Analysis" in report_text
+    assert report["metrics"]["failed_case_count"] > 0
 
 
 def test_empty_expected_runbooks_fails_when_actual_sources_exist():
