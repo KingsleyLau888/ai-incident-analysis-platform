@@ -28,11 +28,16 @@ class MockLLMClient:
         historical_actions = _actions_from_similar_incidents(similar_incidents)
         issue_label = issue_type.replace("_", " ")
         historical_hypothesis = _historical_hypothesis(similar_incidents)
+        context_sources = ["rule-matched logs"]
+        if retrieved_runbook_chunks:
+            context_sources.append("runbook guidance")
+        if similar_incidents:
+            context_sources.append("similar incidents")
 
         return StructuredDiagnosis(
             diagnosis_summary=(
                 f"{service_name} is showing signs of {issue_label} for incident "
-                f"'{incident_title}' based on rule-matched logs, runbook guidance, and similar incidents."
+                f"'{incident_title}' based on {', '.join(context_sources)}."
             ),
             root_cause_hypotheses=[
                 f"{service_name} may be affected by {issue_label}.",

@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.agent.diagnosis_planner import DiagnosisPlanner
 from app.models.analysis import AnalysisRun, AnalysisTrace, IncidentEvidence
 from app.models.incident import Incident
 from app.models.log_entry import LogEntry
@@ -13,6 +14,7 @@ TRACE_STEPS = (
     "log_filtering",
     "rule_detection",
     "evidence_selection",
+    "planner_decision",
     "vector_runbook_retrieval",
     "similar_incident_retrieval",
     "summary_generation",
@@ -29,19 +31,34 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     )
     detection = detect_issue(logs)
     service_name = incident.service.name if incident.service else f"service-{incident.service_id}"
-    runbook_retriever = RunbookRetriever()
-    retrieved_runbook_chunks = runbook_retriever.retrieve(
+    diagnosis_plan = DiagnosisPlanner().plan(
         incident_title=incident.title,
         service_name=service_name,
-        evidence_logs=detection.evidence_logs,
         issue_type=detection.issue_type,
+        severity=detection.severity,
+        evidence_logs=detection.evidence_logs,
+    )
+    runbook_retriever = RunbookRetriever()
+    retrieved_runbook_chunks = (
+        runbook_retriever.retrieve(
+            incident_title=incident.title,
+            service_name=service_name,
+            evidence_logs=detection.evidence_logs,
+            issue_type=detection.issue_type,
+        )
+        if "retrieve_runbooks" in diagnosis_plan.tool_steps
+        else []
     )
     similar_incident_retriever = SimilarIncidentRetriever(embedder=runbook_retriever.embedder)
-    similar_incidents = similar_incident_retriever.retrieve(
-        incident_title=incident.title,
-        service_name=service_name,
-        issue_type=detection.issue_type,
-        evidence_logs=detection.evidence_logs,
+    similar_incidents = (
+        similar_incident_retriever.retrieve(
+            incident_title=incident.title,
+            service_name=service_name,
+            issue_type=detection.issue_type,
+            evidence_logs=detection.evidence_logs,
+        )
+        if "retrieve_similar_incidents" in diagnosis_plan.tool_steps
+        else []
     )
     structured_diagnosis = MockLLMClient().diagnose(
         incident_title=incident.title,
@@ -62,6 +79,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     )
     analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
     analysis_run.set_similar_incidents(serialize_similar_incidents(similar_incidents))
+    analysis_run.set_analysis_plan(diagnosis_plan.analysis_plan, diagnosis_plan.tool_steps)
     analysis_run.set_structured_diagnosis(
         diagnosis_summary=structured_diagnosis.diagnosis_summary,
         root_cause_hypotheses=structured_diagnosis.root_cause_hypotheses,
@@ -84,6 +102,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
         "log_filtering": f"Selected {len(logs)} logs for service_id={incident.service_id}.",
         "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
         "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
+        "planner_decision": f"Planner selected tool_steps={diagnosis_plan.tool_steps}.",
         "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks for issue_type={detection.issue_type}; backend={runbook_retriever.backend_name}.",
         "similar_incident_retrieval": f"Retrieved {len(similar_incidents)} similar incidents for issue_type={detection.issue_type}; backend={similar_incident_retriever.backend_name}.",
         "summary_generation": "Generated legacy template summary plus mock LLM structured diagnosis using runbooks and similar incidents.",
@@ -103,6 +122,7 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     if saved_analysis_run is not None:
         saved_analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
         saved_analysis_run.set_similar_incidents(serialize_similar_incidents(similar_incidents))
+        saved_analysis_run.set_analysis_plan(diagnosis_plan.analysis_plan, diagnosis_plan.tool_steps)
         saved_analysis_run.set_structured_diagnosis(
             diagnosis_summary=structured_diagnosis.diagnosis_summary,
             root_cause_hypotheses=structured_diagnosis.root_cause_hypotheses,

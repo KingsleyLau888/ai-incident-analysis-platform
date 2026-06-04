@@ -36,6 +36,16 @@ class AnalysisRun(Base):
         self._similar_incidents = incidents
 
     @property
+    def analysis_plan(self) -> dict:
+        return getattr(self, "_analysis_plan", {"analysis_plan": "", "tool_steps": []})
+
+    def set_analysis_plan(self, analysis_plan: str, tool_steps: list[str]) -> None:
+        self._analysis_plan = {
+            "analysis_plan": analysis_plan,
+            "tool_steps": tool_steps,
+        }
+
+    @property
     def diagnosis_summary(self) -> str:
         return getattr(self, "_diagnosis_summary", "")
 

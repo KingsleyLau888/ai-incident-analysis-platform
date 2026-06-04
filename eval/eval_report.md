@@ -9,7 +9,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- average_latency_ms: 13.15
+- average_latency_ms: 14.78
 
 ## Cases
 
@@ -26,7 +26,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 31.44
+- latency_ms: 36.71
 - passed: True
 
 ### timeout-checkout-upstream
@@ -42,7 +42,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 11.39
+- latency_ms: 12.46
 - passed: True
 
 ### auth-token-rejected
@@ -58,7 +58,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 10.40
+- latency_ms: 11.42
 - passed: True
 
 ### cache-redis-connection
@@ -74,7 +74,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 10.44
+- latency_ms: 11.37
 - passed: True
 
 ### memory-worker-oom
@@ -90,7 +90,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 10.36
+- latency_ms: 11.55
 - passed: True
 
 ### server-error-api-500
@@ -106,7 +106,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 10.31
+- latency_ms: 11.34
 - passed: True
 
 ### unknown-benign-warning
@@ -122,7 +122,7 @@ Total cases: 7
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - similar_incident_retrieval_recall: 100.00%
-- latency_ms: 7.72
+- latency_ms: 8.61
 - passed: True
 
 ## Failed Cases

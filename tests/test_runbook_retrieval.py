@@ -97,6 +97,8 @@ def test_unknown_issue_analyze_returns_no_runbook_chunks(client: TestClient):
     analysis = response.json()
     assert analysis["issue_type"] == "unknown"
     assert analysis["retrieved_runbook_chunks"] == []
+    assert "retrieve_runbooks" not in analysis["analysis_plan"]["tool_steps"]
+    assert "retrieve_similar_incidents" not in analysis["analysis_plan"]["tool_steps"]
 
 
 def test_trace_contains_vector_runbook_retrieval(client: TestClient):

@@ -42,6 +42,11 @@ class SimilarIncidentRead(BaseModel):
     resolution: str
 
 
+class AnalysisPlanRead(BaseModel):
+    analysis_plan: str
+    tool_steps: list[str]
+
+
 class AnalysisRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,6 +60,9 @@ class AnalysisRunRead(BaseModel):
     evidence_logs: list[EvidenceLogRead] = []
     retrieved_runbook_chunks: list[RetrievedRunbookChunkRead] = []
     similar_incidents: list[SimilarIncidentRead] = []
+    analysis_plan: AnalysisPlanRead = Field(
+        default_factory=lambda: AnalysisPlanRead(analysis_plan="", tool_steps=[])
+    )
     diagnosis_summary: str = ""
     root_cause_hypotheses: list[str] = []
     impact_scope: str = ""

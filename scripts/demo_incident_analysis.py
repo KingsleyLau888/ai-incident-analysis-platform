@@ -85,6 +85,11 @@ def _print_demo_report(service: dict, incident: dict, analysis: dict, trace: lis
     print(f"Issue Type: {analysis['issue_type']}")
     print(f"Severity: {analysis['severity']}")
 
+    print("\n## Analysis Plan")
+    print(analysis["analysis_plan"]["analysis_plan"])
+    for step in analysis["analysis_plan"]["tool_steps"]:
+        print(f"- {step}")
+
     _print_section(
         "Evidence Logs",
         [
