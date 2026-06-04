@@ -33,6 +33,15 @@ class RetrievedRunbookChunkRead(BaseModel):
     score: float
 
 
+class SimilarIncidentRead(BaseModel):
+    historical_id: str
+    title: str
+    issue_type: str
+    similarity_score: float
+    root_cause: str
+    resolution: str
+
+
 class AnalysisRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,6 +54,7 @@ class AnalysisRunRead(BaseModel):
     created_at: datetime
     evidence_logs: list[EvidenceLogRead] = []
     retrieved_runbook_chunks: list[RetrievedRunbookChunkRead] = []
+    similar_incidents: list[SimilarIncidentRead] = []
     diagnosis_summary: str = ""
     root_cause_hypotheses: list[str] = []
     impact_scope: str = ""

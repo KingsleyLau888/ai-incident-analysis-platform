@@ -36,6 +36,7 @@ class EvalCase:
     expected_severity: str
     expected_evidence_keywords: list[str]
     expected_runbook_sources: list[str]
+    expected_similar_issue_types: list[str]
 
 
 def load_eval_cases(path: Path = DEFAULT_CASES_PATH) -> list[EvalCase]:
@@ -96,8 +97,11 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
                 f"- actual_severity: {result['actual_severity']}",
                 f"- expected_runbook_sources: {', '.join(result['expected_runbook_sources']) or '(none)'}",
                 f"- actual_runbook_sources: {', '.join(result['actual_runbook_sources']) or '(none)'}",
+                f"- expected_similar_issue_types: {', '.join(result['expected_similar_issue_types']) or '(none)'}",
+                f"- actual_similar_issue_types: {', '.join(result['actual_similar_issue_types']) or '(none)'}",
                 f"- evidence_recall: {result['evidence_recall']:.2%}",
                 f"- runbook_retrieval_recall: {result['runbook_retrieval_recall']:.2%}",
+                f"- similar_incident_retrieval_recall: {result['similar_incident_retrieval_recall']:.2%}",
                 f"- latency_ms: {result['latency_ms']:.2f}",
                 f"- passed: {result['passed']}",
                 "",
@@ -160,11 +164,19 @@ def _run_case(db: Session, case: EvalCase):
 def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
     actual_evidence_messages = [evidence.log_entry.message for evidence in analysis.evidence_logs]
     actual_runbook_sources = [chunk["source"] for chunk in analysis.retrieved_runbook_chunks]
+    actual_similar_issue_types = [incident["issue_type"] for incident in analysis.similar_incidents]
     evidence_recall = _keyword_recall(case.expected_evidence_keywords, actual_evidence_messages)
     runbook_recall = _source_recall(case.expected_runbook_sources, actual_runbook_sources)
+    similar_incident_recall = _source_recall(case.expected_similar_issue_types, actual_similar_issue_types)
     issue_type_match = analysis.issue_type == case.expected_issue_type
     severity_match = analysis.severity == case.expected_severity
-    passed = issue_type_match and severity_match and evidence_recall == 1.0 and runbook_recall == 1.0
+    passed = (
+        issue_type_match
+        and severity_match
+        and evidence_recall == 1.0
+        and runbook_recall == 1.0
+        and similar_incident_recall == 1.0
+    )
 
     return {
         "case_id": case.case_id,
@@ -176,10 +188,13 @@ def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
         "actual_evidence_messages": actual_evidence_messages,
         "expected_runbook_sources": case.expected_runbook_sources,
         "actual_runbook_sources": actual_runbook_sources,
+        "expected_similar_issue_types": case.expected_similar_issue_types,
+        "actual_similar_issue_types": actual_similar_issue_types,
         "issue_type_match": issue_type_match,
         "severity_match": severity_match,
         "evidence_recall": evidence_recall,
         "runbook_retrieval_recall": runbook_recall,
+        "similar_incident_retrieval_recall": similar_incident_recall,
         "latency_ms": latency_ms,
         "passed": passed,
     }
@@ -192,6 +207,10 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         "severity_accuracy": sum(1 for result in results if result["severity_match"]) / total,
         "evidence_recall": sum(result["evidence_recall"] for result in results) / total,
         "runbook_retrieval_recall": sum(result["runbook_retrieval_recall"] for result in results) / total,
+        "similar_incident_retrieval_recall": sum(
+            result["similar_incident_retrieval_recall"] for result in results
+        )
+        / total,
         "average_latency_ms": sum(result["latency_ms"] for result in results) / total,
     }
 

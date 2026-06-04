@@ -27,6 +27,7 @@ def test_analyze_database_issue(client: TestClient):
     assert analysis["root_cause_hypotheses"]
     assert analysis["impact_scope"] == "Likely impact is scoped to payment-service and its directly related dependencies."
     assert analysis["structured_suggested_actions"]
+    assert analysis["similar_incidents"]
 
 
 def test_analyze_timeout_issue(client: TestClient):
@@ -84,9 +85,10 @@ def test_get_trace(client: TestClient):
         "rule_detection",
         "evidence_selection",
         "vector_runbook_retrieval",
+        "similar_incident_retrieval",
         "summary_generation",
     ]
-    assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5]
+    assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5, 6]
     summary_step = next(step for step in trace if step["step_name"] == "summary_generation")
     assert "mock LLM structured diagnosis" in summary_step["detail"]
 
