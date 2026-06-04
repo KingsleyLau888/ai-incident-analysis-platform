@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 
 import httpx
 
@@ -8,7 +9,7 @@ BASE_URL = os.getenv("INCIDENT_API_URL", "http://127.0.0.1:8000")
 
 def main() -> None:
     with httpx.Client(base_url=BASE_URL, timeout=30.0, trust_env=False) as client:
-        service = _get_or_create_payment_service(client)
+        service = _create_demo_service(client)
         _create_demo_logs(client, service["id"])
         incident = _create_incident(client, service["id"])
         analysis = _request(client, "POST", f"/incidents/{incident['id']}/analyze")
@@ -17,17 +18,14 @@ def main() -> None:
     _print_demo_report(service, incident, analysis, trace)
 
 
-def _get_or_create_payment_service(client: httpx.Client) -> dict:
-    services = _request(client, "GET", "/services")
-    existing = next((service for service in services if service["name"] == "payment-service"), None)
-    if existing is not None:
-        return existing
+def _create_demo_service(client: httpx.Client) -> dict:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
     return _request(
         client,
         "POST",
         "/services",
         json={
-            "name": "payment-service",
+            "name": f"payment-service-demo-{timestamp}",
             "description": "Handles payment API requests.",
             "owner": "payments-team",
         },

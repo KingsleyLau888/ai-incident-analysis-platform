@@ -8,7 +8,8 @@ Total cases: 7
 - severity_accuracy: 100.00%
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- average_latency_ms: 13.55
+- similar_incident_retrieval_recall: 100.00%
+- average_latency_ms: 13.15
 
 ## Cases
 
@@ -20,9 +21,12 @@ Total cases: 7
 - actual_severity: high
 - expected_runbook_sources: database_issue.md
 - actual_runbook_sources: database_issue.md, server_error.md, timeout_issue.md
+- expected_similar_issue_types: database_issue
+- actual_similar_issue_types: database_issue, database_issue, database_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 33.39
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 31.44
 - passed: True
 
 ### timeout-checkout-upstream
@@ -33,9 +37,12 @@ Total cases: 7
 - actual_severity: medium
 - expected_runbook_sources: timeout_issue.md
 - actual_runbook_sources: timeout_issue.md, timeout_issue.md, server_error.md
+- expected_similar_issue_types: timeout_issue
+- actual_similar_issue_types: timeout_issue, server_error, auth_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 11.35
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 11.39
 - passed: True
 
 ### auth-token-rejected
@@ -46,9 +53,12 @@ Total cases: 7
 - actual_severity: medium
 - expected_runbook_sources: auth_issue.md
 - actual_runbook_sources: auth_issue.md, auth_issue.md, auth_issue.md
+- expected_similar_issue_types: auth_issue
+- actual_similar_issue_types: auth_issue, server_error, database_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 10.71
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 10.40
 - passed: True
 
 ### cache-redis-connection
@@ -59,9 +69,12 @@ Total cases: 7
 - actual_severity: medium
 - expected_runbook_sources: cache_issue.md
 - actual_runbook_sources: cache_issue.md, cache_issue.md, cache_issue.md
+- expected_similar_issue_types: cache_issue
+- actual_similar_issue_types: cache_issue, timeout_issue, database_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 10.37
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 10.44
 - passed: True
 
 ### memory-worker-oom
@@ -72,9 +85,12 @@ Total cases: 7
 - actual_severity: high
 - expected_runbook_sources: memory_issue.md
 - actual_runbook_sources: memory_issue.md, memory_issue.md, server_error.md
+- expected_similar_issue_types: memory_issue
+- actual_similar_issue_types: memory_issue, server_error, cache_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 10.17
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 10.36
 - passed: True
 
 ### server-error-api-500
@@ -85,9 +101,12 @@ Total cases: 7
 - actual_severity: high
 - expected_runbook_sources: server_error.md
 - actual_runbook_sources: server_error.md, server_error.md, timeout_issue.md
+- expected_similar_issue_types: server_error
+- actual_similar_issue_types: server_error, database_issue, timeout_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 10.27
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 10.31
 - passed: True
 
 ### unknown-benign-warning
@@ -98,9 +117,12 @@ Total cases: 7
 - actual_severity: low
 - expected_runbook_sources: (none)
 - actual_runbook_sources: (none)
+- expected_similar_issue_types: (none)
+- actual_similar_issue_types: (none)
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- latency_ms: 8.61
+- similar_incident_retrieval_recall: 100.00%
+- latency_ms: 7.72
 - passed: True
 
 ## Failed Cases

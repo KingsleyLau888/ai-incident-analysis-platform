@@ -1,0 +1,82 @@
+[
+  {
+    "historical_id": "HIST-DB-001",
+    "title": "Payment failures caused by exhausted MySQL connection pool",
+    "service_name": "payment-service",
+    "issue_type": "database_issue",
+    "symptoms": ["DBConnectionTimeout", "mysql-primary", "payment requests failed"],
+    "root_cause": "The payment-service database connection pool was exhausted during a traffic spike.",
+    "resolution": "Increased connection pool capacity, reduced connection hold time, and added pool saturation alerts.",
+    "tags": ["mysql", "connection-pool", "payment", "database-timeout"]
+  },
+  {
+    "historical_id": "HIST-DB-002",
+    "title": "Order API could not reach PostgreSQL primary",
+    "service_name": "order-service",
+    "issue_type": "database_issue",
+    "symptoms": ["postgres connection failed", "database unavailable", "order writes failed"],
+    "root_cause": "A network policy change blocked order-service connections to the PostgreSQL primary.",
+    "resolution": "Rolled back the network policy and verified database connectivity from order-service.",
+    "tags": ["postgres", "network-policy", "database", "order"]
+  },
+  {
+    "historical_id": "HIST-TIMEOUT-001",
+    "title": "Checkout upstream requests exceeded deadline",
+    "service_name": "checkout-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["upstream request timed out", "deadline exceeded", "high latency"],
+    "root_cause": "A downstream pricing dependency experienced elevated latency.",
+    "resolution": "Scaled the dependency and adjusted retry and timeout settings.",
+    "tags": ["timeout", "upstream", "checkout", "latency"]
+  },
+  {
+    "historical_id": "HIST-AUTH-001",
+    "title": "Login failures after token signing key rotation",
+    "service_name": "auth-service",
+    "issue_type": "auth_issue",
+    "symptoms": ["401 unauthorized", "token rejected", "login failed"],
+    "root_cause": "Auth-service instances used inconsistent token signing keys after rotation.",
+    "resolution": "Synchronized signing keys and restarted stale auth-service instances.",
+    "tags": ["auth", "token", "401", "credentials"]
+  },
+  {
+    "historical_id": "HIST-CACHE-001",
+    "title": "Cart failures caused by Redis connection outage",
+    "service_name": "cart-service",
+    "issue_type": "cache_issue",
+    "symptoms": ["RedisConnection refused", "cache reads failed", "cart unavailable"],
+    "root_cause": "The Redis primary was unavailable after an incomplete failover.",
+    "resolution": "Completed Redis failover and restored client connectivity.",
+    "tags": ["redis", "cache", "cart", "failover"]
+  },
+  {
+    "historical_id": "HIST-MEM-001",
+    "title": "Worker restarts caused by heap exhaustion",
+    "service_name": "worker-service",
+    "issue_type": "memory_issue",
+    "symptoms": ["OutOfMemory", "OOM", "worker process killed"],
+    "root_cause": "A batch job retained large payloads and exhausted the worker memory limit.",
+    "resolution": "Reduced batch size, fixed payload retention, and increased memory monitoring.",
+    "tags": ["memory", "oom", "worker", "heap"]
+  },
+  {
+    "historical_id": "HIST-SERVER-001",
+    "title": "API returned HTTP 500 after serialization regression",
+    "service_name": "api-service",
+    "issue_type": "server_error",
+    "symptoms": ["500 internal server error", "serialization failed", "request handler exception"],
+    "root_cause": "A deployment introduced an incompatible response serialization change.",
+    "resolution": "Rolled back the deployment and added response contract tests.",
+    "tags": ["500", "server-error", "serialization", "deployment"]
+  },
+  {
+    "historical_id": "HIST-DB-003",
+    "title": "Payment API returned 500 while mysql-primary was saturated",
+    "service_name": "payment-service",
+    "issue_type": "database_issue",
+    "symptoms": ["Payment API returns 500 errors", "DBConnectionTimeout", "mysql-primary saturated"],
+    "root_cause": "mysql-primary reached its connection limit and rejected payment-service connections.",
+    "resolution": "Reduced connection pressure, increased database connection capacity, and added saturation alerts.",
+    "tags": ["payment", "mysql-primary", "500", "database", "connection-limit"]
+  }
+]

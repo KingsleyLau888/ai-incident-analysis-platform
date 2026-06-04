@@ -29,6 +29,13 @@ class AnalysisRun(Base):
         self._retrieved_runbook_chunks = chunks
 
     @property
+    def similar_incidents(self) -> list[dict]:
+        return getattr(self, "_similar_incidents", [])
+
+    def set_similar_incidents(self, incidents: list[dict]) -> None:
+        self._similar_incidents = incidents
+
+    @property
     def diagnosis_summary(self) -> str:
         return getattr(self, "_diagnosis_summary", "")
 

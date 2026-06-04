@@ -12,7 +12,8 @@
     "expected_issue_type": "database_issue",
     "expected_severity": "high",
     "expected_evidence_keywords": ["DBConnectionTimeout", "mysql-primary"],
-    "expected_runbook_sources": ["database_issue.md"]
+    "expected_runbook_sources": ["database_issue.md"],
+    "expected_similar_issue_types": ["database_issue"]
   },
   {
     "case_id": "timeout-checkout-upstream",
@@ -27,7 +28,8 @@
     "expected_issue_type": "timeout_issue",
     "expected_severity": "medium",
     "expected_evidence_keywords": ["timed out"],
-    "expected_runbook_sources": ["timeout_issue.md"]
+    "expected_runbook_sources": ["timeout_issue.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
   },
   {
     "case_id": "auth-token-rejected",
@@ -42,7 +44,8 @@
     "expected_issue_type": "auth_issue",
     "expected_severity": "medium",
     "expected_evidence_keywords": ["401", "unauthorized", "token"],
-    "expected_runbook_sources": ["auth_issue.md"]
+    "expected_runbook_sources": ["auth_issue.md"],
+    "expected_similar_issue_types": ["auth_issue"]
   },
   {
     "case_id": "cache-redis-connection",
@@ -57,7 +60,8 @@
     "expected_issue_type": "cache_issue",
     "expected_severity": "medium",
     "expected_evidence_keywords": ["RedisConnection", "cache"],
-    "expected_runbook_sources": ["cache_issue.md"]
+    "expected_runbook_sources": ["cache_issue.md"],
+    "expected_similar_issue_types": ["cache_issue"]
   },
   {
     "case_id": "memory-worker-oom",
@@ -72,7 +76,8 @@
     "expected_issue_type": "memory_issue",
     "expected_severity": "high",
     "expected_evidence_keywords": ["OutOfMemory", "OOM"],
-    "expected_runbook_sources": ["memory_issue.md"]
+    "expected_runbook_sources": ["memory_issue.md"],
+    "expected_similar_issue_types": ["memory_issue"]
   },
   {
     "case_id": "server-error-api-500",
@@ -87,7 +92,8 @@
     "expected_issue_type": "server_error",
     "expected_severity": "high",
     "expected_evidence_keywords": ["500", "internal server error"],
-    "expected_runbook_sources": ["server_error.md"]
+    "expected_runbook_sources": ["server_error.md"],
+    "expected_similar_issue_types": ["server_error"]
   },
   {
     "case_id": "unknown-benign-warning",
@@ -102,6 +108,7 @@
     "expected_issue_type": "unknown",
     "expected_severity": "low",
     "expected_evidence_keywords": [],
-    "expected_runbook_sources": []
+    "expected_runbook_sources": [],
+    "expected_similar_issue_types": []
   }
 ]
