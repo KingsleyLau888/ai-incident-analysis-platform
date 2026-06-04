@@ -50,7 +50,7 @@ class AnalysisRun(Base):
         return getattr(self, "_diagnosis_summary", "")
 
     @property
-    def root_cause_hypotheses(self) -> list[str]:
+    def root_cause_hypotheses(self) -> list[dict]:
         return getattr(self, "_root_cause_hypotheses", [])
 
     @property
@@ -64,7 +64,7 @@ class AnalysisRun(Base):
     def set_structured_diagnosis(
         self,
         diagnosis_summary: str,
-        root_cause_hypotheses: list[str],
+        root_cause_hypotheses: list[dict],
         impact_scope: str,
         structured_suggested_actions: list[str],
     ) -> None:
