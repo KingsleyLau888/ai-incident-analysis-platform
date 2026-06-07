@@ -3,7 +3,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from app.models.log_entry import LogEntry
-from app.services.embedding_service import TextEmbedder, get_embedder
+from app.services.embedding_service import (
+    TextEmbedder,
+    TfidfEmbedder,
+    get_embedder,
+    get_retrieval_mode,
+    get_sentence_transformer_embedder,
+)
+from app.services.rrf import reciprocal_rank_fusion
 
 
 HISTORICAL_INCIDENTS_PATH = Path(__file__).resolve().parents[2] / "data" / "historical_incidents.json"
@@ -36,13 +43,51 @@ class SimilarIncidentRetriever:
         self,
         incidents: list[HistoricalIncident] | None = None,
         embedder: TextEmbedder | None = None,
+        dense_embedder: TextEmbedder | None = None,
+        retrieval_mode: str | None = None,
     ) -> None:
         self.incidents = incidents if incidents is not None else load_historical_incidents()
-        self.embedder = embedder if embedder is not None else get_embedder()
+        self.retrieval_mode = retrieval_mode or get_retrieval_mode()
+        self.sparse_embedder = TfidfEmbedder()
+        self.dense_embedder = dense_embedder
+        self.fallback_reason: str | None = None
+
+        if self.retrieval_mode == "hybrid":
+            if self.dense_embedder is None:
+                self.dense_embedder = get_sentence_transformer_embedder()
+            if self.dense_embedder is None:
+                self.fallback_reason = "sentence-transformers unavailable"
+            self.embedder = self.sparse_embedder
+        else:
+            self.embedder = embedder if embedder is not None else get_embedder(self.retrieval_mode)
 
     @property
     def backend_name(self) -> str:
         return self.embedder.name
+
+    @property
+    def effective_retrieval_mode(self) -> str:
+        if self.retrieval_mode == "hybrid" and self.dense_embedder is not None:
+            return "hybrid"
+        return self.embedder.name
+
+    @property
+    def retrieval_detail(self) -> str:
+        if self.retrieval_mode == "hybrid" and self.effective_retrieval_mode == "hybrid":
+            return (
+                "retrieval_mode=hybrid; components=[tfidf,sentence-transformers]; "
+                "fusion=rrf; effective_retrieval_mode=hybrid"
+            )
+        if self.retrieval_mode == "hybrid":
+            return (
+                "retrieval_mode=hybrid; components=[tfidf]; fusion=none; "
+                f"effective_retrieval_mode={self.effective_retrieval_mode}; "
+                f"fallback_reason={self.fallback_reason}"
+            )
+        return (
+            f"retrieval_mode={self.retrieval_mode}; "
+            f"effective_retrieval_mode={self.effective_retrieval_mode}"
+        )
 
     def retrieve(
         self,
@@ -62,7 +107,7 @@ class SimilarIncidentRetriever:
             evidence_logs=evidence_logs,
         )
         documents = [_incident_document(incident) for incident in self.incidents]
-        ranked = self.embedder.rank(query, documents, top_k=top_k)
+        ranked = self._rank(query, documents, top_k)
 
         return [
             SimilarIncident(
@@ -75,6 +120,18 @@ class SimilarIncidentRetriever:
             )
             for index, score in ranked
         ]
+
+    def _rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+        if self.retrieval_mode != "hybrid" or self.dense_embedder is None:
+            return self.embedder.rank(query, documents, top_k=top_k)
+
+        sparse_ranked = self.sparse_embedder.rank(query, documents, top_k=top_k)
+        dense_ranked = self.dense_embedder.rank(query, documents, top_k=top_k)
+        fused = reciprocal_rank_fusion(
+            [sparse_ranked, dense_ranked],
+            key=lambda ranked_item: ranked_item[0],
+        )
+        return [(result.item[0], result.score) for result in fused[:top_k]]
 
 
 def load_historical_incidents(

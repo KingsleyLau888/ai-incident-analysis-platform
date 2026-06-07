@@ -8,6 +8,13 @@ class _Log:
         self.message = message
 
 
+class _FakeDenseEmbedder:
+    name = "sentence-transformers"
+
+    def rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+        return [(index, float(len(documents) - index)) for index in range(min(top_k, len(documents)))]
+
+
 def test_database_payment_case_retrieves_database_history():
     retriever = SimilarIncidentRetriever()
 
@@ -24,6 +31,21 @@ def test_database_payment_case_retrieves_database_history():
         "connection" in incident.root_cause.lower() or "mysql-primary" in incident.root_cause.lower()
         for incident in incidents
     )
+
+
+def test_hybrid_retrieval_mode_returns_similar_incidents(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_MODE", "hybrid")
+    retriever = SimilarIncidentRetriever(dense_embedder=_FakeDenseEmbedder())
+
+    incidents = retriever.retrieve(
+        incident_title="Payment API returns 500 errors",
+        service_name="payment-service",
+        issue_type="database_issue",
+        evidence_logs=[_Log("ERROR DBConnectionTimeout while connecting to mysql-primary")],
+    )
+
+    assert incidents
+    assert retriever.effective_retrieval_mode == "hybrid"
 
 
 def test_analyze_returns_similar_incidents_and_trace(client: TestClient):
@@ -52,3 +74,7 @@ def test_analyze_returns_similar_incidents_and_trace(client: TestClient):
     assert "similar_incident_retrieval" in [
         step["step_name"] for step in trace_response.json()
     ]
+    retrieval_step = next(
+        step for step in trace_response.json() if step["step_name"] == "similar_incident_retrieval"
+    )
+    assert "retrieval_mode=" in retrieval_step["detail"]

@@ -1,5 +1,7 @@
 # Eval Report
 
+Retrieval mode: hybrid
+
 Total cases: 14
 
 ## Metrics
@@ -8,13 +10,13 @@ Total cases: 14
 - severity_accuracy: 78.57%
 - evidence_recall: 92.86%
 - runbook_retrieval_recall: 85.71%
-- runbook_top1_accuracy: 71.43%
-- runbook_precision_at_3: 61.90%
+- runbook_top1_accuracy: 85.71%
+- runbook_precision_at_3: 73.81%
 - similar_incident_retrieval_recall: 85.71%
 - similar_incident_top1_accuracy: 78.57%
 - similar_incident_precision_at_3: 45.24%
 - failed_case_count: 4
-- average_latency_ms: 16.25
+- average_latency_ms: 1315.49
 
 ## Cases
 
@@ -25,17 +27,17 @@ Total cases: 14
 - expected_severity: high
 - actual_severity: high
 - expected_runbook_sources: database_issue.md
-- actual_runbook_sources: database_issue.md, server_error.md, timeout_issue.md
+- actual_runbook_sources: database_issue.md, server_error.md, database_issue.md
 - expected_similar_issue_types: database_issue
 - actual_similar_issue_types: database_issue, database_issue, database_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - runbook_top1_correct: True
-- runbook_precision_at_3: 33.33%
+- runbook_precision_at_3: 66.67%
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 100.00%
-- latency_ms: 37.08
+- latency_ms: 16278.09
 - passed: True
 
 ### timeout-checkout-upstream
@@ -45,17 +47,17 @@ Total cases: 14
 - expected_severity: medium
 - actual_severity: medium
 - expected_runbook_sources: timeout_issue.md
-- actual_runbook_sources: timeout_issue.md, timeout_issue.md, server_error.md
+- actual_runbook_sources: timeout_issue.md, timeout_issue.md, timeout_issue.md
 - expected_similar_issue_types: timeout_issue
-- actual_similar_issue_types: timeout_issue, server_error, auth_issue
+- actual_similar_issue_types: timeout_issue, server_error, database_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - runbook_top1_correct: True
-- runbook_precision_at_3: 66.67%
+- runbook_precision_at_3: 100.00%
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 13.96
+- latency_ms: 200.71
 - passed: True
 
 ### auth-token-rejected
@@ -75,7 +77,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 13.48
+- latency_ms: 186.81
 - passed: True
 
 ### cache-redis-connection
@@ -95,7 +97,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 12.65
+- latency_ms: 189.86
 - passed: True
 
 ### memory-worker-oom
@@ -115,7 +117,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 17.11
+- latency_ms: 191.61
 - passed: True
 
 ### server-error-api-500
@@ -135,7 +137,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 15.42
+- latency_ms: 181.91
 - passed: True
 
 ### unknown-benign-warning
@@ -155,7 +157,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 100.00%
-- latency_ms: 12.04
+- latency_ms: 11.60
 - passed: True
 
 ### hard-mixed-database-timeout-primary-timeout
@@ -165,17 +167,17 @@ Total cases: 14
 - expected_severity: medium
 - actual_severity: high
 - expected_runbook_sources: timeout_issue.md
-- actual_runbook_sources: timeout_issue.md, timeout_issue.md, database_issue.md
+- actual_runbook_sources: timeout_issue.md, timeout_issue.md, timeout_issue.md
 - expected_similar_issue_types: timeout_issue
-- actual_similar_issue_types: timeout_issue, server_error, database_issue
+- actual_similar_issue_types: timeout_issue, database_issue, server_error
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
 - runbook_top1_correct: True
-- runbook_precision_at_3: 66.67%
+- runbook_precision_at_3: 100.00%
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 16.63
+- latency_ms: 189.35
 - passed: False
 
 ### hard-server-error-symptom-database-root-cause
@@ -185,17 +187,17 @@ Total cases: 14
 - expected_severity: high
 - actual_severity: high
 - expected_runbook_sources: database_issue.md
-- actual_runbook_sources: server_error.md, server_error.md, database_issue.md
+- actual_runbook_sources: database_issue.md, server_error.md, database_issue.md
 - expected_similar_issue_types: database_issue
 - actual_similar_issue_types: database_issue, database_issue, server_error
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 100.00%
-- runbook_top1_correct: False
-- runbook_precision_at_3: 33.33%
+- runbook_top1_correct: True
+- runbook_precision_at_3: 66.67%
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 66.67%
-- latency_ms: 18.31
+- latency_ms: 189.81
 - passed: True
 
 ### hard-auth-with-timeout-interference
@@ -205,17 +207,17 @@ Total cases: 14
 - expected_severity: medium
 - actual_severity: medium
 - expected_runbook_sources: auth_issue.md
-- actual_runbook_sources: timeout_issue.md, auth_issue.md, timeout_issue.md
+- actual_runbook_sources: auth_issue.md, timeout_issue.md, auth_issue.md
 - expected_similar_issue_types: auth_issue
 - actual_similar_issue_types: timeout_issue, auth_issue, server_error
 - evidence_recall: 0.00%
 - runbook_retrieval_recall: 100.00%
-- runbook_top1_correct: False
-- runbook_precision_at_3: 33.33%
+- runbook_top1_correct: True
+- runbook_precision_at_3: 66.67%
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: False
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 14.62
+- latency_ms: 196.39
 - passed: False
 
 ### hard-cache-warning-not-incident
@@ -227,7 +229,7 @@ Total cases: 14
 - expected_runbook_sources: (none)
 - actual_runbook_sources: cache_issue.md, cache_issue.md, cache_issue.md
 - expected_similar_issue_types: (none)
-- actual_similar_issue_types: cache_issue, database_issue, database_issue
+- actual_similar_issue_types: cache_issue, database_issue, timeout_issue
 - evidence_recall: 100.00%
 - runbook_retrieval_recall: 0.00%
 - runbook_top1_correct: False
@@ -235,7 +237,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 0.00%
 - similar_incident_top1_correct: False
 - similar_incident_precision_at_3: 0.00%
-- latency_ms: 14.17
+- latency_ms: 202.06
 - passed: False
 
 ### hard-memory-warning-without-oom
@@ -245,7 +247,7 @@ Total cases: 14
 - expected_severity: low
 - actual_severity: high
 - expected_runbook_sources: (none)
-- actual_runbook_sources: memory_issue.md, cache_issue.md, memory_issue.md
+- actual_runbook_sources: memory_issue.md, memory_issue.md, memory_issue.md
 - expected_similar_issue_types: (none)
 - actual_similar_issue_types: memory_issue, database_issue, database_issue
 - evidence_recall: 100.00%
@@ -255,7 +257,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 0.00%
 - similar_incident_top1_correct: False
 - similar_incident_precision_at_3: 0.00%
-- latency_ms: 17.04
+- latency_ms: 193.32
 - passed: False
 
 ### hard-unknown-error-like-wording
@@ -275,7 +277,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 100.00%
-- latency_ms: 12.26
+- latency_ms: 10.58
 - passed: True
 
 ### hard-similar-incident-top3-challenge
@@ -295,7 +297,7 @@ Total cases: 14
 - similar_incident_retrieval_recall: 100.00%
 - similar_incident_top1_correct: True
 - similar_incident_precision_at_3: 33.33%
-- latency_ms: 12.75
+- latency_ms: 194.81
 - passed: True
 
 ## Failed Cases
@@ -311,27 +313,27 @@ Total cases: 14
 
 - failure_category: rule_detection
 - expected: issue_type=timeout_issue, severity=medium, runbooks=['timeout_issue.md'], similar_types=['timeout_issue']
-- actual: issue_type=database_issue, severity=high, runbooks=['timeout_issue.md', 'timeout_issue.md', 'database_issue.md'], similar_types=['timeout_issue', 'server_error', 'database_issue']
+- actual: issue_type=database_issue, severity=high, runbooks=['timeout_issue.md', 'timeout_issue.md', 'timeout_issue.md'], similar_types=['timeout_issue', 'database_issue', 'server_error']
 - possible_failure_reason: Keyword priority or ambiguous mixed signals produced a different classification.
 
 ### hard-auth-with-timeout-interference
 
 - failure_category: rule_detection, evidence_selection
 - expected: issue_type=auth_issue, severity=medium, runbooks=['auth_issue.md'], similar_types=['auth_issue']
-- actual: issue_type=timeout_issue, severity=medium, runbooks=['timeout_issue.md', 'auth_issue.md', 'timeout_issue.md'], similar_types=['timeout_issue', 'auth_issue', 'server_error']
+- actual: issue_type=timeout_issue, severity=medium, runbooks=['auth_issue.md', 'timeout_issue.md', 'auth_issue.md'], similar_types=['timeout_issue', 'auth_issue', 'server_error']
 - possible_failure_reason: Keyword priority or ambiguous mixed signals produced a different classification. Expected evidence keywords were not present in the selected evidence logs.
 
 ### hard-cache-warning-not-incident
 
 - failure_category: rule_detection, runbook_retrieval, similar_incident_retrieval
 - expected: issue_type=unknown, severity=low, runbooks=[], similar_types=[]
-- actual: issue_type=cache_issue, severity=medium, runbooks=['cache_issue.md', 'cache_issue.md', 'cache_issue.md'], similar_types=['cache_issue', 'database_issue', 'database_issue']
+- actual: issue_type=cache_issue, severity=medium, runbooks=['cache_issue.md', 'cache_issue.md', 'cache_issue.md'], similar_types=['cache_issue', 'database_issue', 'timeout_issue']
 - possible_failure_reason: Keyword priority or ambiguous mixed signals produced a different classification. The expected runbook source was missing from the retrieved top results. The expected historical issue type was missing from the retrieved top results.
 
 ### hard-memory-warning-without-oom
 
 - failure_category: rule_detection, runbook_retrieval, similar_incident_retrieval
 - expected: issue_type=unknown, severity=low, runbooks=[], similar_types=[]
-- actual: issue_type=memory_issue, severity=high, runbooks=['memory_issue.md', 'cache_issue.md', 'memory_issue.md'], similar_types=['memory_issue', 'database_issue', 'database_issue']
+- actual: issue_type=memory_issue, severity=high, runbooks=['memory_issue.md', 'memory_issue.md', 'memory_issue.md'], similar_types=['memory_issue', 'database_issue', 'database_issue']
 - possible_failure_reason: Keyword priority or ambiguous mixed signals produced a different classification. The expected runbook source was missing from the retrieved top results. The expected historical issue type was missing from the retrieved top results.
 
