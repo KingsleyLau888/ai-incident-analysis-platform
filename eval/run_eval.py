@@ -1,6 +1,9 @@
+import argparse
 import json
+import os
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,32 +50,38 @@ def load_eval_cases(path: Path = DEFAULT_CASES_PATH) -> list[EvalCase]:
 def run_eval(
     cases_path: Path = DEFAULT_CASES_PATH,
     report_path: Path = DEFAULT_REPORT_PATH,
+    retrieval_mode: str | None = None,
 ) -> dict:
-    cases = load_eval_cases(cases_path)
-    case_results = []
+    with _retrieval_mode(retrieval_mode):
+        active_retrieval_mode = os.getenv("RETRIEVAL_MODE", "tfidf")
+        cases = load_eval_cases(cases_path)
+        case_results = []
 
-    with _evaluation_session() as db:
-        for case in cases:
-            started = time.perf_counter()
-            analysis = _run_case(db, case)
-            latency_ms = (time.perf_counter() - started) * 1000
-            case_results.append(_score_case(case, analysis, latency_ms))
+        with _evaluation_session() as db:
+            for case in cases:
+                started = time.perf_counter()
+                analysis = _run_case(db, case)
+                latency_ms = (time.perf_counter() - started) * 1000
+                case_results.append(_score_case(case, analysis, latency_ms))
 
-    metrics = _aggregate_metrics(case_results)
-    report = {
-        "total_cases": len(cases),
-        "metrics": metrics,
-        "cases": case_results,
-        "failed_cases": [result for result in case_results if not result["passed"]],
-    }
-    write_report(report, report_path)
-    return report
+        metrics = _aggregate_metrics(case_results)
+        report = {
+            "retrieval_mode": active_retrieval_mode,
+            "total_cases": len(cases),
+            "metrics": metrics,
+            "cases": case_results,
+            "failed_cases": [result for result in case_results if not result["passed"]],
+        }
+        write_report(report, report_path)
+        return report
 
 
 def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Eval Report",
+        "",
+        f"Retrieval mode: {report.get('retrieval_mode', 'tfidf')}",
         "",
         f"Total cases: {report['total_cases']}",
         "",
@@ -162,6 +171,22 @@ def _evaluation_session():
             self._engine.dispose()
 
     return EvaluationSession()
+
+
+@contextmanager
+def _retrieval_mode(mode: str | None):
+    previous = os.environ.get("RETRIEVAL_MODE")
+    if mode is not None:
+        os.environ["RETRIEVAL_MODE"] = mode
+    try:
+        yield
+    finally:
+        if mode is None:
+            return
+        if previous is None:
+            os.environ.pop("RETRIEVAL_MODE", None)
+        else:
+            os.environ["RETRIEVAL_MODE"] = previous
 
 
 def _run_case(db: Session, case: EvalCase):
@@ -333,8 +358,26 @@ def _possible_failure_reason(categories: list[str]) -> str:
 
 
 def main() -> None:
-    report = run_eval()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=["tfidf", "sentence-transformers", "hybrid"],
+        default=None,
+    )
+    parser.add_argument("--compare-retrieval-modes", action="store_true")
+    args = parser.parse_args()
+
+    if args.compare_retrieval_modes:
+        reports = {
+            mode: run_eval(report_path=EVAL_DIR / f"eval_report_{mode}.md", retrieval_mode=mode)
+            for mode in ["tfidf", "sentence-transformers", "hybrid"]
+        }
+        _print_comparison(reports)
+        return
+
+    report = run_eval(retrieval_mode=args.retrieval_mode)
     print(f"Evaluated {report['total_cases']} cases")
+    print(f"retrieval_mode: {report['retrieval_mode']}")
     for name, value in report["metrics"].items():
         if name == "average_latency_ms":
             print(f"{name}: {value:.2f}")
@@ -343,6 +386,25 @@ def main() -> None:
         else:
             print(f"{name}: {value:.2%}")
     print(f"Wrote report to {DEFAULT_REPORT_PATH}")
+
+
+def _print_comparison(reports: dict[str, dict]) -> None:
+    metric_names = [
+        "runbook_top1_accuracy",
+        "runbook_precision_at_3",
+        "similar_incident_top1_accuracy",
+        "similar_incident_precision_at_3",
+        "average_latency_ms",
+    ]
+    print("Retrieval mode comparison")
+    for mode, report in reports.items():
+        print(f"\n{mode}")
+        for name in metric_names:
+            value = report["metrics"][name]
+            if name == "average_latency_ms":
+                print(f"{name}: {value:.2f}")
+            else:
+                print(f"{name}: {value:.2%}")
 
 
 if __name__ == "__main__":

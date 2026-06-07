@@ -3,6 +3,7 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Protocol
 
 
@@ -64,14 +65,35 @@ class TfidfEmbedder:
         return sorted(scored, key=lambda item: item[1], reverse=True)[:top_k]
 
 
-def get_embedder() -> TextEmbedder:
-    if os.getenv("RUNBOOK_EMBEDDING_BACKEND") != "sentence-transformers":
+VALID_RETRIEVAL_MODES = {"tfidf", "sentence-transformers", "hybrid"}
+
+
+def get_retrieval_mode() -> str:
+    requested_mode = os.getenv("RETRIEVAL_MODE")
+    if requested_mode in VALID_RETRIEVAL_MODES:
+        return requested_mode
+
+    legacy_backend = os.getenv("RUNBOOK_EMBEDDING_BACKEND")
+    if legacy_backend == "sentence-transformers":
+        return "sentence-transformers"
+    return "tfidf"
+
+
+def get_embedder(mode: str | None = None) -> TextEmbedder:
+    requested_mode = mode or get_retrieval_mode()
+    if requested_mode != "sentence-transformers":
         return TfidfEmbedder()
 
+    dense_embedder = get_sentence_transformer_embedder()
+    return dense_embedder if dense_embedder is not None else TfidfEmbedder()
+
+
+@lru_cache(maxsize=1)
+def get_sentence_transformer_embedder() -> TextEmbedder | None:
     try:
         return SentenceTransformerEmbedder()
     except Exception:
-        return TfidfEmbedder()
+        return None
 
 
 def _tokenize(text: str) -> list[str]:

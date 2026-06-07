@@ -11,6 +11,14 @@ class _Log:
         self.message = message
 
 
+class _FakeDenseEmbedder:
+    name = "sentence-transformers"
+
+    def rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+        scored = list(enumerate(reversed([float(index) for index in range(len(documents))])))
+        return sorted(scored, key=lambda item: item[1], reverse=True)[:top_k]
+
+
 def test_runbooks_can_be_chunked():
     chunks = load_runbook_chunks()
 
@@ -65,6 +73,47 @@ def test_sentence_transformers_backend_falls_back_when_unavailable(monkeypatch):
     assert embedder.name == "tfidf"
 
 
+def test_hybrid_retrieval_mode_returns_runbook_results(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_MODE", "hybrid")
+    retriever = RunbookRetriever(dense_embedder=_FakeDenseEmbedder())
+
+    chunks = retriever.retrieve(
+        incident_title="Payment failures",
+        service_name="payment-service",
+        evidence_logs=[_Log("ERROR DBConnectionTimeout when connecting to mysql-primary")],
+        issue_type="database_issue",
+        top_k=3,
+    )
+
+    assert chunks
+    assert retriever.effective_retrieval_mode == "hybrid"
+    assert all(hasattr(chunk, "score") for chunk in chunks)
+
+
+def test_hybrid_falls_back_to_tfidf_when_sentence_transformers_unavailable(monkeypatch):
+    class BrokenSentenceTransformerEmbedder:
+        def __init__(self) -> None:
+            raise RuntimeError("model unavailable")
+
+    monkeypatch.setenv("RETRIEVAL_MODE", "hybrid")
+    monkeypatch.setattr(embedding_service, "SentenceTransformerEmbedder", BrokenSentenceTransformerEmbedder)
+
+    retriever = RunbookRetriever()
+    chunks = retriever.retrieve(
+        incident_title="Payment failures",
+        service_name="payment-service",
+        evidence_logs=[_Log("ERROR DBConnectionTimeout when connecting to mysql-primary")],
+        issue_type="database_issue",
+        top_k=3,
+    )
+
+    assert chunks
+    assert retriever.effective_retrieval_mode == "tfidf"
+    assert "components=[tfidf]" in retriever.retrieval_detail
+    assert "fusion=none" in retriever.retrieval_detail
+    assert "fallback_reason=sentence-transformers unavailable" in retriever.retrieval_detail
+
+
 def test_analyze_returns_retrieved_runbook_chunks(client: TestClient):
     incident = _create_incident_with_logs(
         client,
@@ -116,11 +165,8 @@ def test_trace_contains_vector_runbook_retrieval(client: TestClient):
     trace = response.json()
     assert "vector_runbook_retrieval" in [step["step_name"] for step in trace]
     retrieval_step = next(step for step in trace if step["step_name"] == "vector_runbook_retrieval")
-    assert "backend=" in retrieval_step["detail"]
-    assert any(
-        backend in retrieval_step["detail"]
-        for backend in ["backend=tfidf", "backend=sentence-transformers"]
-    )
+    assert "retrieval_mode=" in retrieval_step["detail"]
+    assert "effective_retrieval_mode=" in retrieval_step["detail"]
 
 
 def _create_incident_with_logs(

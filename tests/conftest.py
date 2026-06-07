@@ -8,6 +8,16 @@ from sqlalchemy.pool import StaticPool
 from app.api.routes import router
 from app.database import Base, get_db
 from app.models import base
+from app.services.embedding_service import get_sentence_transformer_embedder
+
+
+@pytest.fixture(autouse=True)
+def isolate_retrieval_environment(monkeypatch):
+    monkeypatch.delenv("RETRIEVAL_MODE", raising=False)
+    monkeypatch.delenv("RUNBOOK_EMBEDDING_BACKEND", raising=False)
+    get_sentence_transformer_embedder.cache_clear()
+    yield
+    get_sentence_transformer_embedder.cache_clear()
 
 
 @pytest.fixture()
