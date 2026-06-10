@@ -216,5 +216,54 @@
     "expected_evidence_keywords": ["timed out"],
     "expected_runbook_sources": ["timeout_issue.md"],
     "expected_similar_issue_types": ["timeout_issue"]
+  },
+  {
+    "case_id": "adversarial-contradictory-signals",
+    "service_name": "order-service",
+    "incident_title": "Order processing delayed with mixed signals",
+    "incident_description": "Order service shows both timeout and database errors with contradictory evidence.",
+    "logs": [
+      "ERROR upstream request timed out after 30s",
+      "INFO database connection pool is healthy",
+      "WARNING upstream latency increased but database queries returned normally"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["timed out", "database connection pool is healthy"],
+    "expected_runbook_sources": ["timeout_issue.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
+  },
+  {
+    "case_id": "adversarial-noise-injection",
+    "service_name": "payment-service",
+    "incident_title": "Payment processing failures",
+    "incident_description": "Database timeout errors mixed with irrelevant cache warnings.",
+    "logs": [
+      "ERROR DBConnectionTimeout while connecting to mysql-primary",
+      "WARNING cache warming completed slower than expected",
+      "INFO cache keys refreshed successfully",
+      "ERROR payment request failed after database retry"
+    ],
+    "expected_issue_type": "database_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["DBConnectionTimeout", "mysql-primary"],
+    "expected_runbook_sources": ["database_issue.md"],
+    "expected_similar_issue_types": ["database_issue"]
+  },
+  {
+    "case_id": "adversarial-misleading-first-signal",
+    "service_name": "api-gateway",
+    "incident_title": "API Gateway returning errors to clients",
+    "incident_description": "First log suggests auth issue but the root cause is database connection failure.",
+    "logs": [
+      "WARNING 401 unauthorized token expired",
+      "ERROR postgres database connection failed before query",
+      "ERROR downstream service returned 500 after database failure"
+    ],
+    "expected_issue_type": "database_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["postgres", "database connection failed"],
+    "expected_runbook_sources": ["database_issue.md"],
+    "expected_similar_issue_types": ["database_issue"]
   }
 ]

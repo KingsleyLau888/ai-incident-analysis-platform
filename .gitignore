@@ -222,3 +222,4 @@ __marimo__/
 *.pyc
 *.db
 *.db-journal
+.chroma_db/

@@ -21,6 +21,7 @@ from app.schemas.incident import IncidentCreate
 from app.schemas.log_entry import LogEntryCreate
 from app.schemas.service import ServiceCreate
 from app.services import analysis_service, incident_service, log_service, service_service
+from app.services.llm_judge import JudgeVerdict, get_judge
 
 
 EVAL_DIR = PROJECT_ROOT / "eval"
@@ -51,10 +52,12 @@ def run_eval(
     cases_path: Path = DEFAULT_CASES_PATH,
     report_path: Path = DEFAULT_REPORT_PATH,
     retrieval_mode: str | None = None,
+    enable_judge: bool = False,
 ) -> dict:
     with _retrieval_mode(retrieval_mode):
         active_retrieval_mode = os.getenv("RETRIEVAL_MODE", "tfidf")
         cases = load_eval_cases(cases_path)
+        judge = get_judge() if enable_judge else None
         case_results = []
 
         with _evaluation_session() as db:
@@ -62,11 +65,15 @@ def run_eval(
                 started = time.perf_counter()
                 analysis = _run_case(db, case)
                 latency_ms = (time.perf_counter() - started) * 1000
-                case_results.append(_score_case(case, analysis, latency_ms))
+                judge_verdict = None
+                if judge is not None:
+                    judge_verdict = _run_judge(case, analysis, judge)
+                case_results.append(_score_case(case, analysis, latency_ms, judge_verdict))
 
         metrics = _aggregate_metrics(case_results)
         report = {
             "retrieval_mode": active_retrieval_mode,
+            "judge_enabled": enable_judge,
             "total_cases": len(cases),
             "metrics": metrics,
             "cases": case_results,
@@ -76,12 +83,34 @@ def run_eval(
         return report
 
 
+def _run_judge(case: EvalCase, analysis, judge) -> JudgeVerdict | None:
+    """Run LLM-as-Judge evaluation on the analysis result."""
+    try:
+        evidence_messages = [evidence.log_entry.message for evidence in analysis.evidence_logs]
+        return judge.evaluate(
+            incident_title=case.incident_title,
+            service_name=case.service_name,
+            issue_type=analysis.issue_type,
+            severity=analysis.severity,
+            evidence_messages=evidence_messages,
+            diagnosis_summary=analysis.diagnosis_summary,
+            root_cause_hypotheses=[
+                h.model_dump() for h in analysis.root_cause_hypotheses
+            ] if hasattr(analysis, 'root_cause_hypotheses') and analysis.root_cause_hypotheses else [],
+            suggested_actions=analysis.structured_suggested_actions or [analysis.suggested_actions],
+            impact_scope=analysis.impact_scope,
+        )
+    except Exception:
+        return None
+
+
 def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         "# Eval Report",
         "",
         f"Retrieval mode: {report.get('retrieval_mode', 'tfidf')}",
+        f"LLM Judge: {'enabled' if report.get('judge_enabled') else 'disabled'}",
         "",
         f"Total cases: {report['total_cases']}",
         "",
@@ -118,10 +147,24 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
                 f"- similar_incident_top1_correct: {result['similar_incident_top1_correct']}",
                 f"- similar_incident_precision_at_3: {result['similar_incident_precision_at_3']:.2%}",
                 f"- latency_ms: {result['latency_ms']:.2f}",
-                f"- passed: {result['passed']}",
-                "",
             ]
         )
+        # LLM Judge scores
+        if result.get("judge_verdict"):
+            v = result["judge_verdict"]
+            lines.extend([
+                f"- judge_provider: {v.get('provider', 'n/a')}",
+                f"- diagnosis_coherence: {v.get('diagnosis_coherence', 0):.2f}",
+                f"- evidence_grounding: {v.get('evidence_grounding', 0):.2f}",
+                f"- hallucination_flag: {v.get('hallucination_flag', False)}",
+                f"- actionability: {v.get('actionability', 0):.2f}",
+                f"- judge_critique: {v.get('critique', '')}",
+            ])
+        lines.extend([
+            f"- passed: {result['passed']}",
+            f"- failure_categories: {', '.join(result['failure_categories']) or 'none'}",
+            "",
+        ])
 
     lines.extend(["## Failed Cases", ""])
     if report["failed_cases"]:
@@ -148,6 +191,21 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
             )
     else:
         lines.append("- No failed cases.")
+
+    # Add LLM Judge summary section
+    if report.get("judge_enabled") and report.get("metrics", {}).get("judge_diagnosis_coherence") is not None:
+        lines.extend([
+            "",
+            "## LLM Judge Summary",
+            "",
+            "Judge evaluation across all cases:",
+            "",
+            f"- avg diagnosis_coherence: {report['metrics'].get('judge_diagnosis_coherence', 0):.2%}",
+            f"- avg evidence_grounding: {report['metrics'].get('judge_evidence_grounding', 0):.2%}",
+            f"- hallucination_rate: {report['metrics'].get('judge_hallucination_rate', 0):.2%}",
+            f"- avg actionability: {report['metrics'].get('judge_actionability', 0):.2%}",
+            "",
+        ])
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -190,7 +248,10 @@ def _retrieval_mode(mode: str | None):
 
 
 def _run_case(db: Session, case: EvalCase):
-    service = service_service.create_service(db, ServiceCreate(name=case.service_name))
+    # Use case_id suffix to avoid UNIQUE constraint conflicts when
+    # multiple eval cases share the same conceptual service name
+    unique_name = f"{case.service_name}-{case.case_id[-8:]}"
+    service = service_service.create_service(db, ServiceCreate(name=unique_name))
     for message in case.logs:
         log_service.create_log_entry(
             db,
@@ -211,7 +272,12 @@ def _run_case(db: Session, case: EvalCase):
     return analysis_service.analyze_incident(db, incident)
 
 
-def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
+def _score_case(
+    case: EvalCase,
+    analysis,
+    latency_ms: float,
+    judge_verdict: JudgeVerdict | None = None,
+) -> dict:
     actual_evidence_messages = [evidence.log_entry.message for evidence in analysis.evidence_logs]
     actual_runbook_sources = [chunk["source"] for chunk in analysis.retrieved_runbook_chunks]
     actual_similar_issue_types = [incident["issue_type"] for incident in analysis.similar_incidents]
@@ -243,7 +309,7 @@ def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
         similar_incident_recall=similar_incident_recall,
     )
 
-    return {
+    result: dict = {
         "case_id": case.case_id,
         "expected_issue_type": case.expected_issue_type,
         "actual_issue_type": analysis.issue_type,
@@ -270,10 +336,22 @@ def _score_case(case: EvalCase, analysis, latency_ms: float) -> dict:
         "possible_failure_reason": _possible_failure_reason(failure_categories),
     }
 
+    if judge_verdict is not None:
+        result["judge_verdict"] = {
+            "provider": judge_verdict.provider,
+            "diagnosis_coherence": judge_verdict.diagnosis_coherence,
+            "evidence_grounding": judge_verdict.evidence_grounding,
+            "hallucination_flag": judge_verdict.hallucination_flag,
+            "actionability": judge_verdict.actionability,
+            "critique": judge_verdict.critique,
+        }
+
+    return result
+
 
 def _aggregate_metrics(results: list[dict]) -> dict:
     total = len(results) or 1
-    return {
+    metrics = {
         "issue_type_accuracy": sum(1 for result in results if result["issue_type_match"]) / total,
         "severity_accuracy": sum(1 for result in results if result["severity_match"]) / total,
         "evidence_recall": sum(result["evidence_recall"] for result in results) / total,
@@ -297,6 +375,24 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         "failed_case_count": sum(1 for result in results if not result["passed"]),
         "average_latency_ms": sum(result["latency_ms"] for result in results) / total,
     }
+
+    # LLM Judge aggregate metrics
+    judge_results = [r for r in results if r.get("judge_verdict")]
+    if judge_results:
+        metrics["judge_diagnosis_coherence"] = (
+            sum(r["judge_verdict"]["diagnosis_coherence"] for r in judge_results) / len(judge_results)
+        )
+        metrics["judge_evidence_grounding"] = (
+            sum(r["judge_verdict"]["evidence_grounding"] for r in judge_results) / len(judge_results)
+        )
+        metrics["judge_hallucination_rate"] = (
+            sum(1 for r in judge_results if r["judge_verdict"]["hallucination_flag"]) / len(judge_results)
+        )
+        metrics["judge_actionability"] = (
+            sum(r["judge_verdict"]["actionability"] for r in judge_results) / len(judge_results)
+        )
+
+    return metrics
 
 
 def _keyword_recall(expected_keywords: list[str], messages: list[str]) -> float:
@@ -361,23 +457,38 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--retrieval-mode",
-        choices=["tfidf", "sentence-transformers", "hybrid"],
+        choices=["tfidf", "sentence-transformers", "hybrid", "chromadb"],
         default=None,
     )
     parser.add_argument("--compare-retrieval-modes", action="store_true")
+    parser.add_argument("--judge", action="store_true", help="Enable LLM-as-Judge evaluation")
     args = parser.parse_args()
 
     if args.compare_retrieval_modes:
+        modes = ["tfidf", "sentence-transformers", "hybrid"]
+        try:
+            import chromadb  # noqa: F401
+            modes.append("chromadb")
+        except ImportError:
+            pass
         reports = {
-            mode: run_eval(report_path=EVAL_DIR / f"eval_report_{mode}.md", retrieval_mode=mode)
-            for mode in ["tfidf", "sentence-transformers", "hybrid"]
+            mode: run_eval(
+                report_path=EVAL_DIR / f"eval_report_{mode}.md",
+                retrieval_mode=mode,
+                enable_judge=args.judge,
+            )
+            for mode in modes
         }
         _print_comparison(reports)
         return
 
-    report = run_eval(retrieval_mode=args.retrieval_mode)
+    report = run_eval(
+        retrieval_mode=args.retrieval_mode,
+        enable_judge=args.judge,
+    )
     print(f"Evaluated {report['total_cases']} cases")
     print(f"retrieval_mode: {report['retrieval_mode']}")
+    print(f"judge: {'enabled' if report.get('judge_enabled') else 'disabled'}")
     for name, value in report["metrics"].items():
         if name == "average_latency_ms":
             print(f"{name}: {value:.2f}")

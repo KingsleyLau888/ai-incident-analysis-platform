@@ -1,19 +1,46 @@
+"""Incident analysis service.
+
+Orchestrates the full analysis pipeline — rule detection, evidence extraction,
+multi-query retrieval with query rewriting, and structured diagnosis.
+
+Modes (auto-detected):
+    - Full pipeline (default): rule engine → query rewriting → multi-query
+      retrieval → CrossEncoder re-rank → LLM diagnosis. Works with mock LLM.
+    - ReAct Agent: LLM-driven dynamic investigation. Activated by REACT_AGENT_ENABLED=1.
+"""
+
+from __future__ import annotations
+
+import os
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.agent.diagnosis_planner import DiagnosisPlanner
+from app.agent.react_agent import AgentResult, ReActAgent
 from app.llm.factory import get_llm_client
 from app.models.analysis import AnalysisRun, AnalysisTrace, IncidentEvidence
 from app.models.incident import Incident
 from app.models.log_entry import LogEntry
 from app.rule_engine.detector import detect_issue, suggested_actions_for
-from app.services.runbook_retriever import RunbookRetriever, serialize_retrieved_chunks
-from app.services.similar_incident_retriever import SimilarIncidentRetriever, serialize_similar_incidents
+from app.services.query_rewriter import rewrite_query
+from app.services.rrf import reciprocal_rank_fusion
+from app.services.runbook_retriever import (
+    RunbookRetriever,
+    RetrievedRunbookChunk,
+    serialize_retrieved_chunks,
+)
+from app.services.similar_incident_retriever import (
+    SimilarIncident,
+    SimilarIncidentRetriever,
+    serialize_similar_incidents,
+)
 
-TRACE_STEPS = (
+PIPELINE_TRACE_STEPS = (
     "log_filtering",
     "rule_detection",
     "evidence_selection",
+    "query_rewriting",
     "planner_decision",
     "vector_runbook_retrieval",
     "similar_incident_retrieval",
@@ -21,17 +48,61 @@ TRACE_STEPS = (
 )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Feature detection (for the /features API and trace)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def detect_features() -> dict[str, bool | str]:
+    """Return which advanced features are currently active."""
+    from app.services.embedding_service import (
+        CROSS_ENCODER_ENABLED,
+        get_cross_encoder,
+        get_retrieval_mode,
+        get_sentence_transformer_embedder,
+    )
+
+    retrieval_mode = get_retrieval_mode()
+    has_dense = get_sentence_transformer_embedder() is not None
+    has_reranker = get_cross_encoder() is not None
+
+    return {
+        "retrieval_mode": retrieval_mode,
+        "cross_encoder_enabled": CROSS_ENCODER_ENABLED and has_reranker,
+        "query_rewriting_enabled": True,  # always active (template fallback)
+        "query_rewriting_provider": "llm" if _has_real_llm() else "template",
+        "react_agent_enabled": _use_react_agent(),
+        "chromadb_available": retrieval_mode == "chromadb" and has_dense,
+        "sentence_transformer_available": has_dense,
+        "llm_provider": os.getenv("LLM_PROVIDER", "mock"),
+        "chunking_strategy": os.getenv("CHUNKING_STRATEGY", "markdown"),
+    }
+
+
+def _has_real_llm() -> bool:
+    return os.getenv("LLM_PROVIDER") == "openai_compatible" and bool(
+        os.getenv("LLM_API_KEY")
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main entry point
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
 def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
+    """Run the analysis pipeline (or ReAct agent) for *incident*."""
     logs = list(
         db.scalars(
             select(LogEntry)
             .where(LogEntry.service_id == incident.service_id)
             .order_by(LogEntry.timestamp, LogEntry.id)
         ).all()
-    ) #这里是根据传入的incident对象的service_id来查询相关的日志条目，并将它们存储在logs列表中。
-    
-    detection = detect_issue(logs)
+    )
+
+    detection = detect_issue(logs)  # rule engine这里是检测issue的类型
     service_name = incident.service.name if incident.service else f"service-{incident.service_id}"
+
     diagnosis_plan = DiagnosisPlanner().plan(
         incident_title=incident.title,
         service_name=service_name,
@@ -41,40 +112,40 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
     )
 
     runbook_retriever = RunbookRetriever()
-    retrieved_runbook_chunks = (
-        runbook_retriever.retrieve(
-            incident_title=incident.title,
-            service_name=service_name,
-            evidence_logs=detection.evidence_logs,
-            issue_type=detection.issue_type,
-        )
-        if "retrieve_runbooks" in diagnosis_plan.tool_steps
-        else []
-    )
     similar_incident_retriever = SimilarIncidentRetriever(
         embedder=runbook_retriever.embedder,
         dense_embedder=runbook_retriever.dense_embedder,
         retrieval_mode=runbook_retriever.retrieval_mode,
     )
-    similar_incidents = (
-        similar_incident_retriever.retrieve(
-            incident_title=incident.title,
-            service_name=service_name,
-            issue_type=detection.issue_type,
-            evidence_logs=detection.evidence_logs,
+
+    features = detect_features()
+
+    # Choose analysis mode
+    if features["react_agent_enabled"]:
+        retrieved_runbook_chunks, similar_incidents, react_result, diagnosis_result = (
+            _run_react_agent(
+                incident=incident,
+                service_name=service_name,
+                detection=detection,
+                logs=logs,
+                runbook_retriever=runbook_retriever,
+                similar_incident_retriever=similar_incident_retriever,
+            )
         )
-        if "retrieve_similar_incidents" in diagnosis_plan.tool_steps
-        else []
-    )
-    diagnosis_result = get_llm_client().diagnose(
-        incident_title=incident.title,
-        service_name=service_name,
-        issue_type=detection.issue_type,
-        severity=detection.severity,
-        evidence_logs=detection.evidence_logs,
-        retrieved_runbook_chunks=retrieved_runbook_chunks,
-        similar_incidents=similar_incidents,
-    )
+    else:
+        retrieved_runbook_chunks, similar_incidents, react_result, diagnosis_result = (
+            _run_pipeline(
+                incident=incident,
+                service_name=service_name,
+                detection=detection,
+                logs=logs,
+                runbook_retriever=runbook_retriever,
+                similar_incident_retriever=similar_incident_retriever,
+                diagnosis_plan=diagnosis_plan,
+                features=features,
+            )
+        )
+
     structured_diagnosis = diagnosis_result.diagnosis
     summary = f"Detected {detection.issue_type} in {service_name} based on related error logs."
 
@@ -108,23 +179,14 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
             )
         )
 
-    trace_details = {
-        "log_filtering": f"Selected {len(logs)} logs for service_id={incident.service_id}.",
-        "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
-        "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
-        "planner_decision": f"Planner selected tool_steps={diagnosis_plan.tool_steps}.",
-        "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks for issue_type={detection.issue_type}; {runbook_retriever.retrieval_detail}.",
-        "similar_incident_retrieval": f"Retrieved {len(similar_incidents)} similar incidents for issue_type={detection.issue_type}; {similar_incident_retriever.retrieval_detail}.",
-        "summary_generation": f"Generated legacy template summary plus structured diagnosis; provider={diagnosis_result.provider}.",
-    }
-    for index, step_name in enumerate(TRACE_STEPS, start=1):
-        db.add(
-            AnalysisTrace(
-                analysis_run_id=analysis_run.id,
-                step_name=step_name,
-                step_order=index,
-                detail=trace_details[step_name],
-            )
+    # Build trace
+    if react_result is not None:
+        _persist_react_trace(db, analysis_run.id, react_result, logs, detection, diagnosis_result)
+    else:
+        _persist_pipeline_trace(
+            db, analysis_run.id, logs, detection, diagnosis_plan,
+            retrieved_runbook_chunks, similar_incidents, diagnosis_result,
+            runbook_retriever, similar_incident_retriever, features,
         )
 
     db.commit()
@@ -142,6 +204,249 @@ def analyze_incident(db: Session, incident: Incident) -> AnalysisRun:
             structured_suggested_actions=structured_diagnosis.structured_suggested_actions,
         )
     return saved_analysis_run
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pipeline mode (with Query Rewriting + multi-query retrieval)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
+    incident,
+    service_name,
+    detection,
+    logs,
+    runbook_retriever,
+    similar_incident_retriever,
+    diagnosis_plan,
+    features,
+):
+    """Pipeline with Query Rewriting → multi-query retrieval → RRF fusion."""
+    evidence_text = " ".join(log.message for log in detection.evidence_logs)
+
+    # --- Query Rewriting ---
+    rewritten = rewrite_query(
+        incident_title=incident.title,
+        service_name=service_name,
+        issue_type=detection.issue_type,
+        evidence_text=evidence_text,
+    )
+
+    # --- Multi-query Runbook Retrieval ---
+    if "retrieve_runbooks" in diagnosis_plan.tool_steps:
+        if len(rewritten.variants) > 1:
+            # Multi-query: retrieve independently for each variant, fuse with RRF
+            all_ranked: list[list[tuple[int, float]]] = []
+            for variant in rewritten.variants:
+                ranked = runbook_retriever._rank(
+                    variant,
+                    [f"{c.source}\n{c.title}\n{c.content}" for c in runbook_retriever.chunks],
+                    top_k=5,
+                )
+                all_ranked.append(ranked)
+            fused = reciprocal_rank_fusion(
+                all_ranked,
+                key=lambda item: item[0],
+            )
+            top_indices = [
+                (result.item[0], result.score) for result in fused[:3]
+            ]
+            retrieved_runbook_chunks = [
+                RetrievedRunbookChunk(
+                    chunk_id=runbook_retriever.chunks[idx].chunk_id,
+                    source=runbook_retriever.chunks[idx].source,
+                    title=runbook_retriever.chunks[idx].title,
+                    content=runbook_retriever.chunks[idx].content,
+                    score=round(score, 6),
+                )
+                for idx, score in top_indices
+            ]
+        else:
+            retrieved_runbook_chunks = runbook_retriever.retrieve(
+                incident_title=incident.title,
+                service_name=service_name,
+                evidence_logs=detection.evidence_logs,
+                issue_type=detection.issue_type,
+            )
+    else:
+        retrieved_runbook_chunks = []
+
+    # --- Multi-query Similar Incident Retrieval ---
+    if "retrieve_similar_incidents" in diagnosis_plan.tool_steps:
+        if len(rewritten.variants) > 1:
+            all_ranked: list[list[tuple[int, float]]] = []
+            inc_docs = [_incident_doc(inc) for inc in similar_incident_retriever.incidents]
+            for variant in rewritten.variants:
+                ranked = similar_incident_retriever._rank(variant, inc_docs, top_k=5)
+                all_ranked.append(ranked)
+            fused = reciprocal_rank_fusion(all_ranked, key=lambda item: item[0])
+            top_indices = [(result.item[0], result.score) for result in fused[:3]]
+            similar_incidents = [
+                SimilarIncident(
+                    historical_id=similar_incident_retriever.incidents[idx].historical_id,
+                    title=similar_incident_retriever.incidents[idx].title,
+                    issue_type=similar_incident_retriever.incidents[idx].issue_type,
+                    similarity_score=round(score, 6),
+                    root_cause=similar_incident_retriever.incidents[idx].root_cause,
+                    resolution=similar_incident_retriever.incidents[idx].resolution,
+                )
+                for idx, score in top_indices
+            ]
+        else:
+            similar_incidents = similar_incident_retriever.retrieve(
+                incident_title=incident.title,
+                service_name=service_name,
+                issue_type=detection.issue_type,
+                evidence_logs=detection.evidence_logs,
+            )
+    else:
+        similar_incidents = []
+
+    diagnosis_result = get_llm_client().diagnose(
+        incident_title=incident.title,
+        service_name=service_name,
+        issue_type=detection.issue_type,
+        severity=detection.severity,
+        evidence_logs=detection.evidence_logs,
+        retrieved_runbook_chunks=retrieved_runbook_chunks,
+        similar_incidents=similar_incidents,
+    )
+    return retrieved_runbook_chunks, similar_incidents, None, diagnosis_result
+
+
+def _incident_doc(incident) -> str:
+    return "\n".join([
+        incident.historical_id, incident.title, incident.service_name,
+        incident.issue_type, " ".join(incident.symptoms),
+        incident.root_cause, incident.resolution, " ".join(incident.tags),
+    ])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ReAct Agent mode
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _use_react_agent() -> bool:
+    return os.getenv("REACT_AGENT_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _run_react_agent(
+    incident, service_name, detection, logs,
+    runbook_retriever, similar_incident_retriever,
+):
+    def search_logs_fn(ctx): return logs
+    def detect_signals_fn(ctx):
+        d = detect_issue(ctx.get("logs", logs))
+        return {"issue_type": d.issue_type, "severity": d.severity,
+                "matched_issues": d.matched_issues, "evidence_logs": d.evidence_logs}
+    def retrieve_runbooks_fn(query, top_k):
+        return runbook_retriever.retrieve(
+            incident_title=incident.title, service_name=service_name,
+            evidence_logs=detection.evidence_logs, issue_type=detection.issue_type,
+            top_k=top_k)
+    def retrieve_similar_incidents_fn(query, top_k):
+        return similar_incident_retriever.retrieve(
+            incident_title=incident.title, service_name=service_name,
+            issue_type=detection.issue_type, evidence_logs=detection.evidence_logs,
+            top_k=top_k)
+    def generate_diagnosis_fn(ctx):
+        return get_llm_client().diagnose(
+            incident_title=incident.title, service_name=service_name,
+            issue_type=ctx.get("issue_type", detection.issue_type),
+            severity=ctx.get("severity", detection.severity),
+            evidence_logs=ctx.get("evidence_logs", detection.evidence_logs),
+            retrieved_runbook_chunks=ctx.get("runbook_chunks", []),
+            similar_incidents=ctx.get("similar_incidents", []))
+
+    llm_client = _get_react_llm_client()
+    agent = ReActAgent(llm_client=llm_client)
+    result = agent.investigate(
+        incident_title=incident.title, service_name=service_name,
+        search_logs_fn=search_logs_fn, detect_signals_fn=detect_signals_fn,
+        retrieve_runbooks_fn=retrieve_runbooks_fn,
+        retrieve_similar_incidents_fn=retrieve_similar_incidents_fn,
+        generate_diagnosis_fn=generate_diagnosis_fn)
+
+    retrieved = runbook_retriever.retrieve(
+        incident_title=incident.title, service_name=service_name,
+        evidence_logs=detection.evidence_logs, issue_type=detection.issue_type)
+    sim = similar_incident_retriever.retrieve(
+        incident_title=incident.title, service_name=service_name,
+        issue_type=detection.issue_type, evidence_logs=detection.evidence_logs)
+    diagnosis_result = generate_diagnosis_fn({})
+    return retrieved, sim, result, diagnosis_result
+
+
+def _get_react_llm_client():
+    provider = os.getenv("LLM_PROVIDER", "mock")
+    if provider != "openai_compatible": return None
+    try:
+        from app.llm.openai_compatible_client import OpenAICompatibleClient
+        return OpenAICompatibleClient(
+            api_key=os.getenv("LLM_API_KEY", ""),
+            base_url=os.getenv("LLM_BASE_URL", ""),
+            model=os.getenv("LLM_MODEL", ""))
+    except Exception: return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Trace persistence
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _persist_react_trace(db, analysis_run_id, react_result, logs, detection, diagnosis_result):
+    steps_data = [
+        ("react_agent_context", 0,
+         f"Agent mode: {react_result.provider}; total_steps={len(react_result.steps)}; "
+         f"logs_count={len(logs)}; issue_type={detection.issue_type}"),
+    ]
+    for step in react_result.steps:
+        detail = " | ".join(filter(None, [
+            f"Thought: {step.thought}",
+            f"Action: {step.action}" if step.action else "",
+            f"Input: {step.action_input}" if step.action_input else "",
+            f"Observation: {step.observation}",
+        ]))
+        steps_data.append((f"react_step_{step.step_number}", step.step_number, detail))
+    steps_data.append(
+        ("summary_generation", len(react_result.steps) + 1,
+         f"Generated structured diagnosis; provider={diagnosis_result.provider}."))
+    for step_name, step_order, detail in steps_data:
+        db.add(AnalysisTrace(analysis_run_id=analysis_run_id, step_name=step_name,
+                             step_order=step_order, detail=detail))
+
+
+def _persist_pipeline_trace(
+    db, analysis_run_id, logs, detection, diagnosis_plan,
+    retrieved_runbook_chunks, similar_incidents, diagnosis_result,
+    runbook_retriever, similar_incident_retriever, features,
+):
+    from app.services.embedding_service import get_last_retrieval_timing
+
+    timing = get_last_retrieval_timing()
+    rerank_info = ""
+    if timing.get("reranker") and timing["reranker"] != "none":
+        rerank_info = f" rerank={timing['reranker']}({timing.get('rerank_ms', 0):.0f}ms)"
+
+    trace_details = {
+        "log_filtering": f"Selected {len(logs)} logs for service.",
+        "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
+        "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
+        "query_rewriting": f"Query rewriting: provider={features['query_rewriting_provider']}, variants={','.join(features.get('_rewritten_variants', ['(original)']))}.",
+        "planner_decision": f"Planner selected tool_steps={diagnosis_plan.tool_steps}.",
+        "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks; {runbook_retriever.retrieval_detail}{rerank_info}.",
+        "similar_incident_retrieval": f"Retrieved {len(similar_incidents)} similar incidents; {similar_incident_retriever.retrieval_detail}{rerank_info}.",
+        "summary_generation": f"Generated structured diagnosis; provider={diagnosis_result.provider}.",
+    }
+    for index, step_name in enumerate(PIPELINE_TRACE_STEPS, start=1):
+        db.add(AnalysisTrace(analysis_run_id=analysis_run_id, step_name=step_name,
+                             step_order=index, detail=trace_details.get(step_name, "")))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Query helpers
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def get_latest_analysis_for_incident(db: Session, incident_id: int) -> AnalysisRun | None:

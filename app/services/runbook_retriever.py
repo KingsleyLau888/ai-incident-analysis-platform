@@ -2,14 +2,19 @@ from dataclasses import asdict, dataclass
 
 from app.models.log_entry import LogEntry
 from app.services.embedding_service import (
+    ChromaDBRetriever,
     TextEmbedder,
     TfidfEmbedder,
+    get_cross_encoder,
     get_embedder,
+    get_last_retrieval_timing,
     get_retrieval_mode,
     get_sentence_transformer_embedder,
+    two_stage_retrieve,
 )
 from app.services.rrf import reciprocal_rank_fusion
 from app.services.runbook_chunker import RunbookChunk, load_runbook_chunks
+from app.services.vector_store import VectorStore
 
 
 @dataclass(frozen=True)
@@ -35,7 +40,17 @@ class RunbookRetriever:
         self.dense_embedder = dense_embedder
         self.fallback_reason: str | None = None
 
-        if self.retrieval_mode == "hybrid":
+        # ChromaDB path
+        self._vector_store: VectorStore | None = None
+        if self.retrieval_mode == "chromadb":
+            dense = get_sentence_transformer_embedder()
+            if dense is not None:
+                self._vector_store = VectorStore(embed_fn=dense.encode)
+                self._vector_store.ensure_initialized()
+            else:
+                self.fallback_reason = "sentence-transformers unavailable for chromadb"
+            self.embedder = self.sparse_embedder  # fallback ranker
+        elif self.retrieval_mode == "hybrid":
             if self.dense_embedder is None:
                 self.dense_embedder = get_sentence_transformer_embedder()
             if self.dense_embedder is None:
@@ -46,30 +61,42 @@ class RunbookRetriever:
 
     @property
     def backend_name(self) -> str:
+        if self.retrieval_mode == "chromadb" and self._vector_store is not None:
+            return "chromadb"
         return self.embedder.name
 
     @property
     def effective_retrieval_mode(self) -> str:
+        if self.retrieval_mode == "chromadb" and self._vector_store is not None:
+            return "chromadb"
         if self.retrieval_mode == "hybrid" and self.dense_embedder is not None:
             return "hybrid"
         return self.embedder.name
 
     @property
     def retrieval_detail(self) -> str:
+        cross_encoder = get_cross_encoder()
+        rerank_note = f" rerank={cross_encoder.name}" if cross_encoder else ""
+
+        if self.retrieval_mode == "chromadb":
+            if self._vector_store is not None:
+                return f"retrieval_mode=chromadb; store=persistent; count={self._vector_store.runbook_count()}{rerank_note}"
+            return f"retrieval_mode=chromadb; status=degraded; fallback_reason={self.fallback_reason}"
+
         if self.retrieval_mode == "hybrid" and self.effective_retrieval_mode == "hybrid":
             return (
                 "retrieval_mode=hybrid; components=[tfidf,sentence-transformers]; "
-                "fusion=rrf; effective_retrieval_mode=hybrid"
+                f"fusion=rrf; effective_retrieval_mode=hybrid{rerank_note}"
             )
         if self.retrieval_mode == "hybrid":
             return (
                 "retrieval_mode=hybrid; components=[tfidf]; fusion=none; "
                 f"effective_retrieval_mode={self.effective_retrieval_mode}; "
-                f"fallback_reason={self.fallback_reason}"
+                f"fallback_reason={self.fallback_reason}{rerank_note}"
             )
         return (
             f"retrieval_mode={self.retrieval_mode}; "
-            f"effective_retrieval_mode={self.effective_retrieval_mode}"
+            f"effective_retrieval_mode={self.effective_retrieval_mode}{rerank_note}"
         )
 
     def retrieve(
@@ -90,6 +117,21 @@ class RunbookRetriever:
             issue_type=issue_type,
         )
         documents = [f"{chunk.source}\n{chunk.title}\n{chunk.content}" for chunk in self.chunks]
+
+        # ChromaDB path — query the persistent store
+        if self._vector_store is not None:
+            results = self._vector_store.query_runbooks(query, top_k=top_k)
+            return [
+                RetrievedRunbookChunk(
+                    chunk_id=result.get("chunk_id", ""),
+                    source=result.get("source", ""),
+                    title=result.get("title", ""),
+                    content=result.get("content", result.get("document", "")),
+                    score=result["score"],
+                )
+                for result in results
+            ]
+
         ranked = self._rank(query, documents, top_k)
 
         return [
@@ -104,11 +146,38 @@ class RunbookRetriever:
         ]
 
     def _rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
-        if self.retrieval_mode != "hybrid" or self.dense_embedder is None:
-            return self.embedder.rank(query, documents, top_k=top_k)
+        # Two-stage retrieval (coarse → CrossEncoder fine)
+        return two_stage_retrieve(
+            query=query,
+            documents=documents,
+            coarse_top_k=10,
+            fine_top_k=top_k,
+            coarse_ranker=self._coarse_ranker(),
+        )
 
-        sparse_ranked = self.sparse_embedder.rank(query, documents, top_k=top_k)
-        dense_ranked = self.dense_embedder.rank(query, documents, top_k=top_k)
+    def _coarse_ranker(self) -> TextEmbedder:
+        if self.retrieval_mode != "hybrid" or self.dense_embedder is None:
+            return self.embedder
+
+        # For hybrid mode, create a composite ranker that fuses sparse + dense
+        return _HybridRanker(self.sparse_embedder, self.dense_embedder)
+
+
+class _HybridRanker:
+    """Composite ranker fusing sparse and dense scores with RRF."""
+
+    name = "hybrid"
+
+    def __init__(self, sparse: TextEmbedder, dense: TextEmbedder):
+        self._sparse = sparse
+        self._dense = dense
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return []
+
+    def rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+        sparse_ranked = self._sparse.rank(query, documents, top_k=top_k)
+        dense_ranked = self._dense.rank(query, documents, top_k=top_k)
         fused = reciprocal_rank_fusion(
             [sparse_ranked, dense_ranked],
             key=lambda ranked_item: ranked_item[0],

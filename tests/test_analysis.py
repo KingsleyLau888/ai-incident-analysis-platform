@@ -87,12 +87,13 @@ def test_get_trace(client: TestClient):
         "log_filtering",
         "rule_detection",
         "evidence_selection",
+        "query_rewriting",
         "planner_decision",
         "vector_runbook_retrieval",
         "similar_incident_retrieval",
         "summary_generation",
     ]
-    assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5, 6, 7]
+    assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5, 6, 7, 8]
     summary_step = next(step for step in trace if step["step_name"] == "summary_generation")
     assert "provider=mock" in summary_step["detail"]
 
