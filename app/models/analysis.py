@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -15,6 +15,25 @@ class AnalysisRun(Base):
     severity: Mapped[str] = mapped_column(String(30))
     root_cause_summary: Mapped[str] = mapped_column(Text)
     suggested_actions: Mapped[str] = mapped_column(Text)
+    _retrieved_runbook_chunks: Mapped[list[dict]] = mapped_column(
+        "retrieved_runbook_chunks", JSON, default=list
+    )
+    _similar_incidents: Mapped[list[dict]] = mapped_column(
+        "similar_incidents", JSON, default=list
+    )
+    _analysis_plan: Mapped[dict] = mapped_column(
+        "analysis_plan", JSON, default=lambda: {"analysis_plan": "", "tool_steps": []}
+    )
+    _diagnosis_summary: Mapped[str] = mapped_column(
+        "diagnosis_summary", Text, default=""
+    )
+    _root_cause_hypotheses: Mapped[list[dict]] = mapped_column(
+        "root_cause_hypotheses", JSON, default=list
+    )
+    _impact_scope: Mapped[str] = mapped_column("impact_scope", Text, default="")
+    _structured_suggested_actions: Mapped[list[str]] = mapped_column(
+        "structured_suggested_actions", JSON, default=list
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     incident: Mapped["Incident"] = relationship(back_populates="analysis_runs")
@@ -23,21 +42,21 @@ class AnalysisRun(Base):
 
     @property
     def retrieved_runbook_chunks(self) -> list[dict]:
-        return getattr(self, "_retrieved_runbook_chunks", [])
+        return self._retrieved_runbook_chunks or []
 
     def set_retrieved_runbook_chunks(self, chunks: list[dict]) -> None:
         self._retrieved_runbook_chunks = chunks
 
     @property
     def similar_incidents(self) -> list[dict]:
-        return getattr(self, "_similar_incidents", [])
+        return self._similar_incidents or []
 
     def set_similar_incidents(self, incidents: list[dict]) -> None:
         self._similar_incidents = incidents
 
     @property
     def analysis_plan(self) -> dict:
-        return getattr(self, "_analysis_plan", {"analysis_plan": "", "tool_steps": []})
+        return self._analysis_plan or {"analysis_plan": "", "tool_steps": []}
 
     def set_analysis_plan(self, analysis_plan: str, tool_steps: list[str]) -> None:
         self._analysis_plan = {
@@ -47,19 +66,19 @@ class AnalysisRun(Base):
 
     @property
     def diagnosis_summary(self) -> str:
-        return getattr(self, "_diagnosis_summary", "")
+        return self._diagnosis_summary or ""
 
     @property
     def root_cause_hypotheses(self) -> list[dict]:
-        return getattr(self, "_root_cause_hypotheses", [])
+        return self._root_cause_hypotheses or []
 
     @property
     def impact_scope(self) -> str:
-        return getattr(self, "_impact_scope", "")
+        return self._impact_scope or ""
 
     @property
     def structured_suggested_actions(self) -> list[str]:
-        return getattr(self, "_structured_suggested_actions", [])
+        return self._structured_suggested_actions or []
 
     def set_structured_diagnosis(
         self,

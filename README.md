@@ -1,5 +1,34 @@
 # AI Incident Copilot Platform
 
+## 实时接入模式
+
+当前版本支持自动日志接入、Incident 检测、Analysis Job、SSE 实时状态和监控 Dashboard。
+
+启动平台：
+
+```powershell
+$env:DATABASE_URL="sqlite:///$($env:TEMP.Replace('\','/'))/incident-live.db"
+uvicorn app.main:app --reload --port 8000
+```
+
+启动独立的测试支付服务：
+
+```powershell
+$env:INCIDENT_API_URL="http://127.0.0.1:8000"
+uvicorn demo_payment_service.app:app --reload --port 8001
+```
+
+制造一次数据库故障并请求支付：
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8001/faults/database
+curl.exe -X POST http://127.0.0.1:8001/payments
+```
+
+访问 `http://127.0.0.1:8000`，页面会实时显示日志、自动 Incident、Analysis Job 进度和完整诊断。人工构造数据的入口位于 `http://127.0.0.1:8000/dev-tools`。
+
+Python 应用和 Fluent Bit 的接入方式见 `integrations/README.md`。
+
 面向 AIOps 场景的智能故障诊断后端系统。
 
 本项目围绕 Incident Analysis Pipeline，结合规则信号检测、证据日志提取、Runbook Retrieval、可插拔 LLM 结构化诊断、Trace 和离线 Eval Harness，演示一次事故从日志分析到诊断结果生成的完整后端流程。

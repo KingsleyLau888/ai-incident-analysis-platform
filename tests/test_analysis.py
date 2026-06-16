@@ -68,6 +68,13 @@ def test_get_analysis(client: TestClient):
     analysis = response.json()
     assert analysis["issue_type"] == "database_issue"
     assert analysis["severity"] == "high"
+    assert analysis["retrieved_runbook_chunks"]
+    assert analysis["similar_incidents"]
+    assert analysis["analysis_plan"]["tool_steps"]
+    assert "order-service is showing signs of database issue" in analysis["diagnosis_summary"]
+    assert analysis["root_cause_hypotheses"]
+    assert analysis["impact_scope"]
+    assert analysis["structured_suggested_actions"]
 
 
 def test_get_trace(client: TestClient):

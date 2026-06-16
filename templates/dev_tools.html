@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>开发工具</title>
+<style>body{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#f4f6f8;color:#17202a;margin:0}main{max-width:920px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;align-items:center}section{background:#fff;border:1px solid #dce1e6;border-radius:6px;padding:16px;margin:14px 0}label{display:block;margin:10px 0 4px;color:#66717d}input,textarea,select{width:100%;padding:9px;border:1px solid #cbd2d9;border-radius:4px}textarea{min-height:90px}button{margin-top:12px;padding:9px 14px;background:#1769aa;color:#fff;border:0;border-radius:4px;cursor:pointer}.output{white-space:pre-wrap;font-family:Consolas,monospace;background:#101418;color:#d8dee4;padding:12px;min-height:80px}a{color:#1769aa;text-decoration:none}</style></head>
+<body><main><header><div><h1>开发工具</h1><p>人工构造数据与接口调试</p></div><a href="/">返回实时监控</a></header>
+<section><h2>注册服务</h2><label>服务名称</label><input id="service-name" value="payment-service-dev"><button onclick="createService()">创建服务</button></section>
+<section><h2>导入日志</h2><label>服务</label><select id="log-service"></select><label>日志，一行一条</label><textarea id="log-lines">ERROR DBConnectionTimeout while connecting to mysql-primary&#10;ERROR payment request failed after database retry&#10;ERROR Payment API returned 500</textarea><button onclick="sendLogs()">发送日志</button></section>
+<section><h2>输出</h2><div id="output" class="output"></div></section></main>
+<script>
+const out=v=>document.querySelector('#output').textContent=typeof v==='string'?v:JSON.stringify(v,null,2);
+async function api(path,opt){const r=await fetch(path,opt);const v=await r.json();if(!r.ok)throw new Error(v.detail||r.statusText);return v}
+async function load(){const s=await api('/services');document.querySelector('#log-service').innerHTML=s.map(x=>`<option value="${x.id}">${x.name}</option>`).join('')}
+async function createService(){try{out(await api('/services',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.querySelector('#service-name').value})}));load()}catch(e){out(e.message)}}
+async function sendLogs(){const id=Number(document.querySelector('#log-service').value);const lines=document.querySelector('#log-lines').value.split('\n').filter(Boolean);for(const message of lines)await api('/logs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service_id:id,level:message.includes('ERROR')?'ERROR':'INFO',message})});out(`已发送 ${lines.length} 条日志，自动检测已启动。`)}
+load();
+</script></body></html>

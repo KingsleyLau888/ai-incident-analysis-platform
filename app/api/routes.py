@@ -1,21 +1,31 @@
 """API routes — REST endpoints, SSE streaming, and dashboard."""
 
+import asyncio
 import json
 import time
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.schemas.analysis import AnalysisRunRead, AnalysisTraceRead
+from app.schemas.analysis_job import AnalysisJobRead
 from app.schemas.feedback import FeedbackCreate, FeedbackRead
 from app.schemas.incident import IncidentCreate, IncidentRead
-from app.schemas.log_entry import LogEntryCreate, LogEntryRead
+from app.schemas.log_entry import ExternalLogCreate, LogEntryCreate, LogEntryRead
 from app.schemas.service import ServiceCreate, ServiceRead
-from app.services import analysis_service, feedback_service, incident_service, log_service, service_service
+from app.services import (
+    analysis_service,
+    analysis_job_service,
+    automatic_incident_service,
+    feedback_service,
+    incident_service,
+    log_service,
+    service_service,
+)
 
 router = APIRouter()
 
@@ -52,10 +62,46 @@ def get_features():
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
     """Main dashboard page — create services, logs, incidents, and analyze."""
-    services = service_service.list_services(db)
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request, "services": services},
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+@router.get("/dev-tools", response_class=HTMLResponse)
+def dev_tools(request: Request):
+    return templates.TemplateResponse("dev_tools.html", {"request": request})
+
+
+@router.get("/events")
+async def platform_events():
+    """Publish live services, logs, incidents, and analysis jobs."""
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        while True:
+            with SessionLocal() as event_db:
+                payload = {
+                    "services": [
+                        ServiceRead.model_validate(item).model_dump(mode="json")
+                        for item in service_service.list_services(event_db)
+                    ],
+                    "incidents": [
+                        IncidentRead.model_validate(item).model_dump(mode="json")
+                        for item in incident_service.list_incidents(event_db)[-50:]
+                    ],
+                    "logs": [
+                        LogEntryRead.model_validate(item).model_dump(mode="json")
+                        for item in log_service.list_log_entries(event_db)[-50:]
+                    ],
+                    "jobs": [
+                        AnalysisJobRead.model_validate(item).model_dump(mode="json")
+                        for item in analysis_job_service.list_jobs(event_db, limit=50)
+                    ],
+                }
+            yield _sse_event("snapshot", payload)
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -88,10 +134,52 @@ def get_service(service_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/logs", response_model=LogEntryRead, status_code=status.HTTP_201_CREATED)
-def create_log_entry(log_in: LogEntryCreate, db: Session = Depends(get_db)):
+def create_log_entry(
+    log_in: LogEntryCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     if service_service.get_service(db, log_in.service_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
-    return log_service.create_log_entry(db, log_in)
+    log_entry = log_service.create_log_entry(db, log_in)
+    incident, job_id = automatic_incident_service.process_log_entry(db, log_entry)
+    if incident is not None and job_id is not None:
+        background_tasks.add_task(
+            automatic_incident_service.analyze_incident_in_background,
+            db.get_bind(),
+            job_id,
+        )
+    return log_entry
+
+
+@router.post("/ingest/logs", response_model=LogEntryRead, status_code=status.HTTP_201_CREATED)
+def ingest_external_log(
+    log_in: ExternalLogCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    service = next(
+        (item for item in service_service.list_services(db) if item.name == log_in.service_name),
+        None,
+    )
+    if service is None:
+        service = service_service.create_service(
+            db,
+            ServiceCreate(name=log_in.service_name, description="Automatically registered"),
+        )
+    log_entry = log_service.create_log_entry(
+        db,
+        LogEntryCreate(
+            service_id=service.id,
+            level=log_in.level,
+            message=log_in.message,
+            timestamp=log_in.timestamp,
+        ),
+    )
+    incident, job_id = automatic_incident_service.process_log_entry(db, log_entry)
+    if incident is not None and job_id is not None:
+        background_tasks.add_task(analysis_job_service.run_job, db.get_bind(), job_id)
+    return log_entry
 
 
 @router.get("/logs", response_model=list[LogEntryRead])
@@ -128,6 +216,39 @@ def get_incident(incident_id: int, db: Session = Depends(get_db)):
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
     return incident
+
+
+@router.post(
+    "/incidents/{incident_id}/analysis-jobs",
+    response_model=AnalysisJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_analysis_job(
+    incident_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    if incident_service.get_incident(db, incident_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+    background_tasks.add_task(analysis_job_service.run_job, db.get_bind(), job.id)
+    return job
+
+
+@router.get("/analysis-jobs", response_model=list[AnalysisJobRead])
+def list_analysis_jobs(
+    incident_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    return analysis_job_service.list_jobs(db, incident_id=incident_id)
+
+
+@router.get("/analysis-jobs/{job_id}", response_model=AnalysisJobRead)
+def get_analysis_job(job_id: int, db: Session = Depends(get_db)):
+    job = analysis_job_service.get_job(db, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis job not found")
+    return job
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
