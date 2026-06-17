@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -33,7 +34,14 @@ class EmbeddingFunction(Protocol):
 # Default persistence directory
 # ---------------------------------------------------------------------------
 
-DEFAULT_PERSIST_DIR = Path(__file__).resolve().parents[2] / ".chroma_db"
+DEFAULT_PERSIST_DIR = Path(tempfile.gettempdir()) / "ai_incident_chroma"
+
+
+def get_chroma_persist_dir() -> Path:
+    configured = os.getenv("CHROMA_PERSIST_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return DEFAULT_PERSIST_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +61,7 @@ class VectorStore:
     """
 
     embed_fn: EmbeddingFunction
-    persist_dir: Path = DEFAULT_PERSIST_DIR
+    persist_dir: Path = field(default_factory=get_chroma_persist_dir)
     runbook_collection_name: str = "runbook_chunks"
     incident_collection_name: str = "historical_incidents"
 
@@ -103,11 +111,13 @@ class VectorStore:
 
     def _index_runbooks(self, force: bool = False) -> None:
         collection = self._get_runbook_collection()
-        if not force and collection.count() > 0:
-            return
 
         chunks = load_runbook_chunks()
         if not chunks:
+            return
+
+        existing_count = collection.count()
+        if not force and existing_count == len(chunks):
             return
 
         ids = [c.chunk_id for c in chunks]
@@ -117,13 +127,15 @@ class VectorStore:
                 "source": c.source,
                 "title": c.title,
                 "chunk_id": c.chunk_id,
+                "issue_type": c.issue_type,
+                "chunk_type": c.chunk_type,
+                "strategy": c.strategy,
             }
             for c in chunks
         ]
 
-        # Delete existing entries before re-adding (incremental is possible,
-        # but for simplicity we rebuild on force).
-        if force and collection.count() > 0:
+        # Rebuild when forced or when the source dataset size changed.
+        if existing_count > 0:
             all_ids = collection.get()["ids"]
             if all_ids:
                 collection.delete(ids=all_ids)
@@ -135,11 +147,13 @@ class VectorStore:
         from app.services.similar_incident_retriever import load_historical_incidents
 
         collection = self._get_incident_collection()
-        if not force and collection.count() > 0:
-            return
 
         incidents = load_historical_incidents()
         if not incidents:
+            return
+
+        existing_count = collection.count()
+        if not force and existing_count == len(incidents):
             return
 
         ids = [inc.historical_id for inc in incidents]
@@ -157,7 +171,7 @@ class VectorStore:
             for inc in incidents
         ]
 
-        if force and collection.count() > 0:
+        if existing_count > 0:
             all_ids = collection.get()["ids"]
             if all_ids:
                 collection.delete(ids=all_ids)

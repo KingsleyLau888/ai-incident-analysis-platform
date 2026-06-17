@@ -15,6 +15,16 @@ class _FakeDenseEmbedder:
         return [(index, float(len(documents) - index)) for index in range(min(top_k, len(documents)))]
 
 
+class _FakeIncidentVectorStore:
+    def __init__(self, historical_id: str) -> None:
+        self.historical_id = historical_id
+        self.queries: list[str] = []
+
+    def query_incidents(self, query: str, top_k: int) -> list[dict]:
+        self.queries.append(query)
+        return [{"historical_id": self.historical_id, "score": 0.88}]
+
+
 def test_database_payment_case_retrieves_database_history():
     retriever = SimilarIncidentRetriever()
 
@@ -46,6 +56,18 @@ def test_hybrid_retrieval_mode_returns_similar_incidents(monkeypatch):
 
     assert incidents
     assert retriever.effective_retrieval_mode == "hybrid"
+
+
+def test_chromadb_rank_uses_vector_store_results():
+    retriever = SimilarIncidentRetriever(retrieval_mode="tfidf")
+    target_incident = retriever.incidents[-1]
+    vector_store = _FakeIncidentVectorStore(target_incident.historical_id)
+    retriever._vector_store = vector_store
+
+    ranked = retriever._rank("database connection timeout", [], top_k=3)
+
+    assert vector_store.queries == ["database connection timeout"]
+    assert ranked == [(len(retriever.incidents) - 1, 0.88)]
 
 
 def test_analyze_returns_similar_incidents_and_trace(client: TestClient):

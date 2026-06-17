@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 from app.services import embedding_service
@@ -6,6 +7,7 @@ from app.services import embedding_service
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_EVAL_PATH = PROJECT_ROOT / "eval" / "run_eval.py"
+RAG_ABLATION_PATH = PROJECT_ROOT / "scripts" / "rag_ablation_benchmark.py"
 EVAL_CASES_PATH = PROJECT_ROOT / "eval" / "eval_cases.json"
 
 
@@ -13,6 +15,15 @@ def _load_run_eval_module():
     spec = importlib.util.spec_from_file_location("run_eval", RUN_EVAL_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_rag_ablation_module():
+    spec = importlib.util.spec_from_file_location("rag_ablation_benchmark", RAG_ABLATION_PATH)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules["rag_ablation_benchmark"] = module
     spec.loader.exec_module(module)
     return module
 
@@ -88,3 +99,71 @@ def test_empty_expected_runbooks_fails_when_actual_sources_exist():
     recall = run_eval._source_recall([], ["database_issue.md"])
 
     assert recall == 0.0
+
+
+def test_write_benchmark_report_generates_markdown(tmp_path):
+    run_eval = _load_run_eval_module()
+    path = tmp_path / "retrieval_benchmark_report.md"
+    reports = {
+        "tfidf": {
+            "metrics": {
+                "issue_type_accuracy": 0.8,
+                "runbook_top1_accuracy": 0.5,
+                "runbook_precision_at_3": 0.4,
+                "similar_incident_top1_accuracy": 0.45,
+                "similar_incident_precision_at_3": 0.5,
+                "average_latency_ms": 10.0,
+                "failed_case_count": 3,
+            },
+            "failed_cases": [{"case_id": "case-a"}],
+        },
+        "hybrid": {
+            "metrics": {
+                "issue_type_accuracy": 0.8,
+                "runbook_top1_accuracy": 0.7,
+                "runbook_precision_at_3": 0.6,
+                "similar_incident_top1_accuracy": 0.55,
+                "similar_incident_precision_at_3": 0.6,
+                "average_latency_ms": 30.0,
+                "failed_case_count": 2,
+            },
+            "failed_cases": [],
+        },
+    }
+
+    run_eval.write_benchmark_report(reports, path)
+
+    text = path.read_text(encoding="utf-8")
+    assert "# Retrieval Benchmark Report" in text
+    assert "| mode |" in text
+    assert "Best runbook top-1 accuracy: hybrid" in text
+
+
+def test_write_rag_ablation_report_generates_markdown(tmp_path):
+    rag_ablation = _load_rag_ablation_module()
+    path = tmp_path / "rag_ablation_report.md"
+    reports = {
+        "tfidf_single_query": {
+            "effective_retrieval_mode": "tfidf",
+            "multi_query": False,
+            "metadata_filter": False,
+            "runbook_top1_accuracy": 0.5,
+            "runbook_precision_at_3": 0.4,
+            "average_latency_ms": 10.0,
+        },
+        "chromadb_multi_query_metadata": {
+            "effective_retrieval_mode": "chromadb",
+            "multi_query": True,
+            "metadata_filter": True,
+            "runbook_top1_accuracy": 0.7,
+            "runbook_precision_at_3": 0.6,
+            "average_latency_ms": 20.0,
+        },
+    }
+
+    rag_ablation.write_report(reports, path)
+
+    text = path.read_text(encoding="utf-8")
+    assert "# RAG Ablation Report" in text
+    assert "chromadb_multi_query_metadata" in text
+    assert "top1 delta +20.00%" in text

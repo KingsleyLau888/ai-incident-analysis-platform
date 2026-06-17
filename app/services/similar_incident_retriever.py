@@ -61,8 +61,12 @@ class SimilarIncidentRetriever:
         if self.retrieval_mode == "chromadb":
             dense = get_sentence_transformer_embedder()
             if dense is not None:
-                self._vector_store = VectorStore(embed_fn=dense.encode)
-                self._vector_store.ensure_initialized()
+                try:
+                    self._vector_store = VectorStore(embed_fn=dense.encode)
+                    self._vector_store.ensure_initialized()
+                except Exception as exc:
+                    self._vector_store = None
+                    self.fallback_reason = f"chromadb unavailable: {exc}"
             else:
                 self.fallback_reason = "sentence-transformers unavailable for chromadb"
             self.embedder = self.sparse_embedder
@@ -164,6 +168,18 @@ class SimilarIncidentRetriever:
         ]
 
     def _rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+        if self._vector_store is not None:
+            incident_index = {
+                incident.historical_id: index
+                for index, incident in enumerate(self.incidents)
+            }
+            ranked = []
+            for result in self._vector_store.query_incidents(query, top_k=top_k):
+                historical_id = result.get("historical_id")
+                if historical_id in incident_index:
+                    ranked.append((incident_index[historical_id], result["score"]))
+            return ranked
+
         return two_stage_retrieve(
             query=query,
             documents=documents,

@@ -20,6 +20,36 @@
     "tags": ["postgres", "network-policy", "database", "order"]
   },
   {
+    "historical_id": "HIST-DB-003",
+    "title": "Payment API returned 500 while mysql-primary was saturated",
+    "service_name": "payment-service",
+    "issue_type": "database_issue",
+    "symptoms": ["Payment API returns 500 errors", "DBConnectionTimeout", "mysql-primary saturated"],
+    "root_cause": "mysql-primary reached its connection limit and rejected payment-service connections.",
+    "resolution": "Reduced connection pressure, increased database connection capacity, and added saturation alerts.",
+    "tags": ["payment", "mysql-primary", "500", "database", "connection-limit"]
+  },
+  {
+    "historical_id": "HIST-DB-004",
+    "title": "Billing writes failed after Postgres failover",
+    "service_name": "billing-service",
+    "issue_type": "database_issue",
+    "symptoms": ["postgres primary unavailable", "invoice write failed", "connection refused"],
+    "root_cause": "Clients kept using the old PostgreSQL primary endpoint after failover.",
+    "resolution": "Refreshed DNS cache, restarted billing-service pods, and validated writes to the new primary.",
+    "tags": ["postgres", "failover", "billing", "dns-cache"]
+  },
+  {
+    "historical_id": "HIST-DB-005",
+    "title": "Slow reporting queries exceeded client deadlines",
+    "service_name": "reporting-service",
+    "issue_type": "database_issue",
+    "symptoms": ["slow query", "database response after deadline", "report timeout"],
+    "root_cause": "A missing index caused report aggregation queries to scan a large table.",
+    "resolution": "Added the missing index and capped expensive report windows.",
+    "tags": ["slow-query", "index", "reporting", "deadline"]
+  },
+  {
     "historical_id": "HIST-TIMEOUT-001",
     "title": "Checkout upstream requests exceeded deadline",
     "service_name": "checkout-service",
@@ -28,6 +58,36 @@
     "root_cause": "A downstream pricing dependency experienced elevated latency.",
     "resolution": "Scaled the dependency and adjusted retry and timeout settings.",
     "tags": ["timeout", "upstream", "checkout", "latency"]
+  },
+  {
+    "historical_id": "HIST-TIMEOUT-002",
+    "title": "Payment provider deadline exceeded during authorization",
+    "service_name": "payment-edge-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["payment authorization deadline", "provider timeout", "retry exhausted"],
+    "root_cause": "The external payment provider degraded and exceeded the client timeout budget.",
+    "resolution": "Enabled circuit breaker fallback and reduced retry amplification.",
+    "tags": ["payment-provider", "timeout", "authorization", "external-api"]
+  },
+  {
+    "historical_id": "HIST-TIMEOUT-003",
+    "title": "Inventory reservation timed out after queue lag",
+    "service_name": "inventory-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["reservation timeout", "queue lag", "consumer delay"],
+    "root_cause": "Inventory workers lagged behind due to an oversized message batch.",
+    "resolution": "Scaled consumers and reduced batch size.",
+    "tags": ["timeout", "queue", "inventory", "worker"]
+  },
+  {
+    "historical_id": "HIST-TIMEOUT-004",
+    "title": "API Gateway upstream timeout to checkout",
+    "service_name": "api-gateway",
+    "issue_type": "timeout_issue",
+    "symptoms": ["gateway timeout", "upstream timeout", "checkout deadline exceeded"],
+    "root_cause": "Checkout service latency exceeded the gateway timeout after a dependency slowdown.",
+    "resolution": "Raised the circuit breaker threshold temporarily and fixed the downstream latency.",
+    "tags": ["gateway", "timeout", "checkout", "upstream"]
   },
   {
     "historical_id": "HIST-AUTH-001",
@@ -40,6 +100,36 @@
     "tags": ["auth", "token", "401", "credentials"]
   },
   {
+    "historical_id": "HIST-AUTH-002",
+    "title": "Checkout rejected valid tokens after gateway config drift",
+    "service_name": "checkout-service",
+    "issue_type": "auth_issue",
+    "symptoms": ["valid users rejected", "401", "auth middleware rejected token"],
+    "root_cause": "API gateway and checkout-service used different issuer configuration.",
+    "resolution": "Restored issuer config and added token validation canaries.",
+    "tags": ["auth", "gateway", "token", "issuer"]
+  },
+  {
+    "historical_id": "HIST-AUTH-003",
+    "title": "OAuth callback failed after redirect URI change",
+    "service_name": "identity-service",
+    "issue_type": "auth_issue",
+    "symptoms": ["oauth callback failed", "invalid redirect uri", "login incomplete"],
+    "root_cause": "The OAuth provider still had the old callback URL.",
+    "resolution": "Updated redirect URI and replayed login canaries.",
+    "tags": ["oauth", "callback", "auth", "redirect"]
+  },
+  {
+    "historical_id": "HIST-AUTH-004",
+    "title": "Expired customer tokens caused mobile checkout failures",
+    "service_name": "mobile-api",
+    "issue_type": "auth_issue",
+    "symptoms": ["expired token", "401 unauthorized", "checkout blocked"],
+    "root_cause": "A mobile client stopped refreshing access tokens after an SDK regression.",
+    "resolution": "Rolled back the SDK and forced token refresh on app resume.",
+    "tags": ["token-expiry", "mobile", "checkout", "auth"]
+  },
+  {
     "historical_id": "HIST-CACHE-001",
     "title": "Cart failures caused by Redis connection outage",
     "service_name": "cart-service",
@@ -48,6 +138,26 @@
     "root_cause": "The Redis primary was unavailable after an incomplete failover.",
     "resolution": "Completed Redis failover and restored client connectivity.",
     "tags": ["redis", "cache", "cart", "failover"]
+  },
+  {
+    "historical_id": "HIST-CACHE-002",
+    "title": "Cache stampede overloaded product database",
+    "service_name": "catalog-service",
+    "issue_type": "cache_issue",
+    "symptoms": ["cache miss spike", "hot key expired", "database read surge"],
+    "root_cause": "A hot product cache key expired simultaneously across all nodes.",
+    "resolution": "Added TTL jitter and request coalescing for hot keys.",
+    "tags": ["cache-stampede", "hot-key", "catalog", "database-load"]
+  },
+  {
+    "historical_id": "HIST-CACHE-003",
+    "title": "Session cache endpoint changed during deploy",
+    "service_name": "session-service",
+    "issue_type": "cache_issue",
+    "symptoms": ["cache endpoint mismatch", "session reads failed", "redis timeout"],
+    "root_cause": "A deployment pointed session-service to a retired Redis endpoint.",
+    "resolution": "Restored the endpoint and added config validation.",
+    "tags": ["redis", "session", "config", "deploy"]
   },
   {
     "historical_id": "HIST-MEM-001",
@@ -60,6 +170,26 @@
     "tags": ["memory", "oom", "worker", "heap"]
   },
   {
+    "historical_id": "HIST-MEM-002",
+    "title": "Search indexer memory leak after parser release",
+    "service_name": "search-indexer",
+    "issue_type": "memory_issue",
+    "symptoms": ["memory usage increased", "OOMKilled", "indexer restart"],
+    "root_cause": "A parser release retained document buffers in memory.",
+    "resolution": "Rolled back the parser and added heap profiling alerts.",
+    "tags": ["memory", "search", "indexer", "deploy"]
+  },
+  {
+    "historical_id": "HIST-MEM-003",
+    "title": "Image worker exceeded memory during large uploads",
+    "service_name": "media-worker",
+    "issue_type": "memory_issue",
+    "symptoms": ["heap allocation failed", "large image upload", "worker killed"],
+    "root_cause": "Workers decoded large images fully in memory instead of streaming.",
+    "resolution": "Added streaming image processing and upload size limits.",
+    "tags": ["memory", "media", "upload", "worker"]
+  },
+  {
     "historical_id": "HIST-SERVER-001",
     "title": "API returned HTTP 500 after serialization regression",
     "service_name": "api-service",
@@ -70,13 +200,143 @@
     "tags": ["500", "server-error", "serialization", "deployment"]
   },
   {
-    "historical_id": "HIST-DB-003",
-    "title": "Payment API returned 500 while mysql-primary was saturated",
+    "historical_id": "HIST-SERVER-002",
+    "title": "Null pointer exception in recommendation API",
+    "service_name": "recommendation-service",
+    "issue_type": "server_error",
+    "symptoms": ["500", "null pointer", "handler exception"],
+    "root_cause": "A new recommendation model returned an unexpected empty feature set.",
+    "resolution": "Added null guards and rolled back the model version.",
+    "tags": ["500", "exception", "recommendation", "model"]
+  },
+  {
+    "historical_id": "HIST-SERVER-003",
+    "title": "Bad feature flag caused checkout 500 errors",
+    "service_name": "checkout-service",
+    "issue_type": "server_error",
+    "symptoms": ["500 internal server error", "feature flag enabled", "request exception"],
+    "root_cause": "A feature flag enabled a code path that expected missing configuration.",
+    "resolution": "Disabled the flag and added config validation at startup.",
+    "tags": ["500", "feature-flag", "checkout", "config"]
+  },
+  {
+    "historical_id": "HIST-NET-001",
+    "title": "DNS failures prevented services from reaching payment provider",
     "service_name": "payment-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["could not resolve host", "DNS timeout", "provider unreachable"],
+    "root_cause": "CoreDNS pods were overloaded after a node rotation.",
+    "resolution": "Scaled DNS resolvers and added DNS latency alerts.",
+    "tags": ["dns", "network", "payment-provider", "timeout"]
+  },
+  {
+    "historical_id": "HIST-NET-002",
+    "title": "Firewall blocked checkout to inventory dependency",
+    "service_name": "checkout-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["connection timed out", "inventory unreachable", "network policy"],
+    "root_cause": "A firewall policy removed checkout-service from the allowed source list.",
+    "resolution": "Restored the allow rule and added connectivity tests.",
+    "tags": ["firewall", "network-policy", "checkout", "timeout"]
+  },
+  {
+    "historical_id": "HIST-DEPLOY-001",
+    "title": "Config mismatch after release caused invalid credentials",
+    "service_name": "pricing-service",
+    "issue_type": "auth_issue",
+    "symptoms": ["invalid credentials", "permission denied", "config mismatch"],
+    "root_cause": "The release referenced a secret name that did not exist in production.",
+    "resolution": "Rolled back the release and added secret existence checks.",
+    "tags": ["config", "secret", "deploy", "credentials"]
+  },
+  {
+    "historical_id": "HIST-DEPLOY-002",
+    "title": "Order service bad release caused response serialization errors",
+    "service_name": "order-service",
+    "issue_type": "server_error",
+    "symptoms": ["serialization failed", "500", "new release"],
+    "root_cause": "A response schema changed without updating API clients.",
+    "resolution": "Rolled back and introduced contract tests.",
+    "tags": ["deploy", "serialization", "500", "contract"]
+  },
+  {
+    "historical_id": "HIST-QUEUE-001",
+    "title": "Email delivery delayed by message queue lag",
+    "service_name": "notification-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["queue lag", "delivery delayed", "worker behind"],
+    "root_cause": "Notification consumers were underprovisioned during a campaign.",
+    "resolution": "Scaled workers and capped campaign send rate.",
+    "tags": ["queue", "lag", "notification", "worker"]
+  },
+  {
+    "historical_id": "HIST-QUEUE-002",
+    "title": "Kafka rebalance loop stalled inventory updates",
+    "service_name": "inventory-consumer",
+    "issue_type": "timeout_issue",
+    "symptoms": ["consumer rebalance", "offset not advancing", "processing stalled"],
+    "root_cause": "Consumer processing exceeded max poll interval and triggered rebalances.",
+    "resolution": "Reduced batch size and tuned max poll interval.",
+    "tags": ["kafka", "rebalance", "queue", "timeout"]
+  },
+  {
+    "historical_id": "HIST-SEARCH-001",
+    "title": "Search results stale after indexing worker failure",
+    "service_name": "search-service",
+    "issue_type": "server_error",
+    "symptoms": ["indexing lag", "stale search results", "bulk index failed"],
+    "root_cause": "Search indexing workers failed bulk writes after cluster pressure.",
+    "resolution": "Replayed failed index jobs and scaled the search cluster.",
+    "tags": ["search", "index", "stale", "worker"]
+  },
+  {
+    "historical_id": "HIST-RATE-001",
+    "title": "Rate limit spike blocked legitimate checkout requests",
+    "service_name": "api-gateway",
+    "issue_type": "server_error",
+    "symptoms": ["429", "rate limit", "checkout blocked"],
+    "root_cause": "A WAF rule misclassified legitimate mobile checkout traffic.",
+    "resolution": "Adjusted WAF rule and added customer segment monitoring.",
+    "tags": ["rate-limit", "waf", "checkout", "429"]
+  },
+  {
+    "historical_id": "HIST-EXT-001",
+    "title": "Shipping provider degraded with intermittent 5xx",
+    "service_name": "shipping-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["third party 5xx", "provider timeout", "retry exhausted"],
+    "root_cause": "The external shipping provider returned intermittent 5xx responses.",
+    "resolution": "Enabled fallback carrier quotes and reduced retry pressure.",
+    "tags": ["third-party", "shipping", "timeout", "5xx"]
+  },
+  {
+    "historical_id": "HIST-EXT-002",
+    "title": "Fraud scoring API latency delayed payments",
+    "service_name": "payment-service",
+    "issue_type": "timeout_issue",
+    "symptoms": ["fraud api timeout", "payment delayed", "authorization pending"],
+    "root_cause": "The external fraud scoring API exceeded the payment timeout budget.",
+    "resolution": "Enabled asynchronous fraud review for low-risk payments.",
+    "tags": ["third-party", "fraud", "payment", "timeout"]
+  },
+  {
+    "historical_id": "HIST-CONFIG-001",
+    "title": "Secret rotation broke Redis authentication",
+    "service_name": "cart-service",
+    "issue_type": "cache_issue",
+    "symptoms": ["redis auth failed", "invalid password", "cache unavailable"],
+    "root_cause": "Redis password rotated but cart-service pods still used the old secret.",
+    "resolution": "Restarted pods with the new secret and added secret rollout validation.",
+    "tags": ["redis", "secret", "cache", "config"]
+  },
+  {
+    "historical_id": "HIST-CONFIG-002",
+    "title": "Database credentials mismatch after secret rollout",
+    "service_name": "billing-service",
     "issue_type": "database_issue",
-    "symptoms": ["Payment API returns 500 errors", "DBConnectionTimeout", "mysql-primary saturated"],
-    "root_cause": "mysql-primary reached its connection limit and rejected payment-service connections.",
-    "resolution": "Reduced connection pressure, increased database connection capacity, and added saturation alerts.",
-    "tags": ["payment", "mysql-primary", "500", "database", "connection-limit"]
+    "symptoms": ["database authentication failed", "invalid credentials", "connection failed"],
+    "root_cause": "Billing service used a stale database password after secret rotation.",
+    "resolution": "Synchronized the database secret and restarted stale pods.",
+    "tags": ["database", "secret", "credentials", "billing"]
   }
 ]

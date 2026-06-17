@@ -75,7 +75,9 @@ def detect_features() -> dict[str, bool | str]:
     )
 
     retrieval_mode = get_retrieval_mode()
-    has_dense = get_sentence_transformer_embedder() is not None
+    has_dense = False
+    if retrieval_mode in {"sentence-transformers", "hybrid", "chromadb"}:
+        has_dense = get_sentence_transformer_embedder() is not None
     has_reranker = get_cross_encoder() is not None
 
     return {
@@ -316,6 +318,7 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
                     variant,
                     [f"{c.source}\n{c.title}\n{c.content}" for c in runbook_retriever.chunks],
                     top_k=5,
+                    issue_type=detection.issue_type,
                 )
                 all_ranked.append(ranked)
             fused = reciprocal_rank_fusion(

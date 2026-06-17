@@ -53,7 +53,15 @@ class SentenceTransformerEmbedder:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise RuntimeError("sentence-transformers is not installed") from exc
-        self._model = SentenceTransformer(self.model_name)
+        try:
+            self._model = SentenceTransformer(self.model_name)
+        except Exception as first_error:
+            try:
+                self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            except Exception as local_error:
+                raise RuntimeError(
+                    f"sentence-transformers model unavailable: {first_error}"
+                ) from local_error
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         embeddings = self._model.encode(texts, normalize_embeddings=True)

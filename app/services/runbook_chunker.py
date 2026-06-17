@@ -29,6 +29,8 @@ class RunbookChunk:
     title: str
     content: str
     strategy: str = "markdown"  # "markdown" | "fixed" | "semantic"
+    issue_type: str = "unknown"
+    chunk_type: str = "general"
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +85,8 @@ def _chunk_markdown(path: Path, text: str, title: str) -> list[RunbookChunk]:
                     title=chunk_title,
                     content=content,
                     strategy="markdown",
+                    issue_type=infer_issue_type(path.name, chunk_title, content),
+                    chunk_type=infer_chunk_type(chunk_title),
                 )
             )
     return chunks
@@ -119,6 +123,8 @@ def _chunk_fixed(
                     title=title,
                     content=content,
                     strategy="fixed",
+                    issue_type=infer_issue_type(path.name, title, content),
+                    chunk_type="general",
                 )
             )
             index += 1
@@ -181,6 +187,8 @@ def _chunk_semantic(path: Path, text: str, title: str) -> list[RunbookChunk]:
                         title=title,
                         content=content,
                         strategy="semantic",
+                        issue_type=infer_issue_type(path.name, title, content),
+                        chunk_type="general",
                     )
                 )
                 index += 1
@@ -194,13 +202,15 @@ def _chunk_semantic(path: Path, text: str, title: str) -> list[RunbookChunk]:
         if content:
             chunks.append(
                 RunbookChunk(
-                    chunk_id=f"{path.stem}:sem:{index}",
-                    source=path.name,
-                    title=title,
-                    content=content,
-                    strategy="semantic",
-                )
+                chunk_id=f"{path.stem}:sem:{index}",
+                source=path.name,
+                title=title,
+                content=content,
+                strategy="semantic",
+                issue_type=infer_issue_type(path.name, title, content),
+                chunk_type="general",
             )
+        )
 
     return chunks
 
@@ -251,3 +261,33 @@ def _split_sentences(text: str) -> list[str]:
     # Split on sentence-ending punctuation followed by space and capital letter
     sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text)
     return [s.strip() for s in sentences if s.strip()]
+
+
+def infer_issue_type(source: str, title: str = "", content: str = "") -> str:
+    text = f"{source} {title} {content}".lower()
+    if any(term in text for term in ["database", "mysql", "postgres", "connection_pool", "dbconnection"]):
+        return "database_issue"
+    if any(term in text for term in ["timeout", "deadline", "dns", "queue", "kafka", "provider"]):
+        return "timeout_issue"
+    if any(term in text for term in ["auth", "oauth", "token", "credential", "secret", "permission"]):
+        return "auth_issue"
+    if any(term in text for term in ["cache", "redis", "stampede"]):
+        return "cache_issue"
+    if any(term in text for term in ["memory", "oom", "heap"]):
+        return "memory_issue"
+    if any(term in text for term in ["server_error", "500", "rollback", "serialization", "release"]):
+        return "server_error"
+    return "unknown"
+
+
+def infer_chunk_type(title: str) -> str:
+    normalized = title.lower()
+    if "symptom" in normalized:
+        return "symptoms"
+    if "check" in normalized or "diagnostic" in normalized:
+        return "checks"
+    if "action" in normalized or "resolution" in normalized or "rollback" in normalized:
+        return "actions"
+    if "cause" in normalized:
+        return "causes"
+    return "general"

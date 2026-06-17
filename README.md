@@ -254,6 +254,80 @@ eval/eval_report.md
 - `runbook_retrieval_recall`
 - `average_latency_ms`
 
+也可以运行检索模式对比：
+
+```powershell
+python eval/run_eval.py --compare-retrieval-modes
+```
+
+如果要比较 `chromadb`，建议先预构建本地向量索引：
+
+```powershell
+$env:HF_HUB_OFFLINE="1"
+$env:TRANSFORMERS_OFFLINE="1"
+$env:CHROMA_PERSIST_DIR="$env:TEMP\ai_incident_chroma_benchmark"
+python scripts/build_vector_index.py --force --persist-dir $env:CHROMA_PERSIST_DIR
+python eval/run_eval.py --compare-retrieval-modes
+```
+
+该命令会在同一批 eval cases 上比较多种 retrieval 方案，并生成：
+
+- `tfidf`：关键词检索 baseline。
+- `sentence-transformers`：不使用向量数据库的内存语义检索 baseline。
+- `hybrid`：TF-IDF + sentence-transformers 的融合实验。
+- `chromadb`：预计算 embedding 后写入 ChromaDB 的 vector database RAG 主线方案。
+
+```text
+eval/retrieval_benchmark_report.md
+```
+
+报告里会同时显示 requested mode 和 `effective_retrieval_modes`。如果模型或 ChromaDB 不可用，系统会 fallback 到 TF-IDF，报告中会体现实际生效模式，避免把 fallback 误认为真实 dense retrieval 结果。
+
+当前推荐把 `chromadb` 作为标准 RAG 主线，把其他模式作为对照实验使用。
+
+如果想直接观察每种 retrieval mode 返回了哪些 runbook 和历史事故，可以运行：
+
+```powershell
+$env:HF_HUB_OFFLINE="1"
+$env:TRANSFORMERS_OFFLINE="1"
+python scripts/debug_retrieval.py --top-k 3
+```
+
+如果想判断每个 RAG 技术是否真的带来提升，可以运行 ablation benchmark：
+
+```powershell
+$env:HF_HUB_OFFLINE="1"
+$env:TRANSFORMERS_OFFLINE="1"
+python scripts/build_vector_index.py --force
+python scripts/rag_ablation_benchmark.py
+```
+
+该报告会生成：
+
+```text
+eval/rag_ablation_report.md
+```
+
+它专门比较：
+
+- `tfidf_single_query`：关键词检索 baseline。
+- `dense_single_query`：sentence-transformers 语义检索。
+- `chromadb_single_query`：预计算向量 + ChromaDB 检索。
+- `chromadb_multi_query`：多 query + ChromaDB + RRF。
+- `chromadb_multi_query_metadata`：多 query + ChromaDB + issue_type metadata filter。
+
+推荐只把有明确收益的技术放进主线；没有收益的技术保留为实验对照，不作为项目卖点。
+
+对比指标包括：
+
+- `runbook_top1_accuracy`
+- `runbook_precision_at_3`
+- `similar_incident_top1_accuracy`
+- `similar_incident_precision_at_3`
+- `average_latency_ms`
+
+这只是本地模拟数据集上的检索评测，用来观察不同 retrieval mode 的质量和耗时差异，不代表生产环境准确率。
+
 ## Runbook Retrieval
 
 Runbook 文档存放在：

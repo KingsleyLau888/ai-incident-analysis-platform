@@ -1,3 +1,4 @@
+﻿import os
 from dataclasses import asdict, dataclass
 
 from app.models.log_entry import LogEntry
@@ -40,13 +41,16 @@ class RunbookRetriever:
         self.dense_embedder = dense_embedder
         self.fallback_reason: str | None = None
 
-        # ChromaDB path
         self._vector_store: VectorStore | None = None
         if self.retrieval_mode == "chromadb":
             dense = get_sentence_transformer_embedder()
             if dense is not None:
-                self._vector_store = VectorStore(embed_fn=dense.encode)
-                self._vector_store.ensure_initialized()
+                try:
+                    self._vector_store = VectorStore(embed_fn=dense.encode)
+                    self._vector_store.ensure_initialized()
+                except Exception as exc:
+                    self._vector_store = None
+                    self.fallback_reason = f"chromadb unavailable: {exc}"
             else:
                 self.fallback_reason = "sentence-transformers unavailable for chromadb"
             self.embedder = self.sparse_embedder  # fallback ranker
@@ -80,7 +84,11 @@ class RunbookRetriever:
 
         if self.retrieval_mode == "chromadb":
             if self._vector_store is not None:
-                return f"retrieval_mode=chromadb; store=persistent; count={self._vector_store.runbook_count()}{rerank_note}"
+                return (
+                    f"retrieval_mode=chromadb; store=persistent; "
+                    f"count={self._vector_store.runbook_count()}; "
+                    f"metadata_filter={_runbook_metadata_filter_enabled()}{rerank_note}"
+                )
             return f"retrieval_mode=chromadb; status=degraded; fallback_reason={self.fallback_reason}"
 
         if self.retrieval_mode == "hybrid" and self.effective_retrieval_mode == "hybrid":
@@ -118,21 +126,7 @@ class RunbookRetriever:
         )
         documents = [f"{chunk.source}\n{chunk.title}\n{chunk.content}" for chunk in self.chunks]
 
-        # ChromaDB path — query the persistent store
-        if self._vector_store is not None:
-            results = self._vector_store.query_runbooks(query, top_k=top_k)
-            return [
-                RetrievedRunbookChunk(
-                    chunk_id=result.get("chunk_id", ""),
-                    source=result.get("source", ""),
-                    title=result.get("title", ""),
-                    content=result.get("content", result.get("document", "")),
-                    score=result["score"],
-                )
-                for result in results
-            ]
-
-        ranked = self._rank(query, documents, top_k)
+        ranked = self._rank(query, documents, top_k, issue_type=issue_type)
 
         return [
             RetrievedRunbookChunk(
@@ -145,8 +139,17 @@ class RunbookRetriever:
             for index, score in ranked
         ]
 
-    def _rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
-        # Two-stage retrieval (coarse → CrossEncoder fine)
+    def _rank(
+        self,
+        query: str,
+        documents: list[str],
+        top_k: int,
+        issue_type: str | None = None,
+    ) -> list[tuple[int, float]]:
+        if self._vector_store is not None:
+            return self._rank_with_vector_store(query, top_k, issue_type)
+
+        # Two-stage retrieval (coarse 鈫?CrossEncoder fine)
         return two_stage_retrieve(
             query=query,
             documents=documents,
@@ -154,6 +157,42 @@ class RunbookRetriever:
             fine_top_k=top_k,
             coarse_ranker=self._coarse_ranker(),
         )
+
+    def _rank_with_vector_store(
+        self,
+        query: str,
+        top_k: int,
+        issue_type: str | None = None,
+    ) -> list[tuple[int, float]]:
+        if self._vector_store is None:
+            return []
+
+        candidate_k = max(top_k, int(os.getenv("VECTOR_RETRIEVAL_CANDIDATES", "10")))
+        where = _runbook_metadata_filter(issue_type)
+        results = self._vector_store.query_runbooks(query, top_k=candidate_k, where=where)
+        if not results and where is not None:
+            results = self._vector_store.query_runbooks(query, top_k=candidate_k)
+
+        chunk_index = {
+            chunk.chunk_id: index
+            for index, chunk in enumerate(self.chunks)
+        }
+        ranked = [
+            (chunk_index[result["chunk_id"]], result["score"])
+            for result in results
+            if result.get("chunk_id") in chunk_index
+        ]
+
+        reranker = get_cross_encoder()
+        if reranker is None or len(ranked) <= top_k:
+            return ranked[:top_k]
+
+        candidate_documents = [
+            f"{self.chunks[index].source}\n{self.chunks[index].title}\n{self.chunks[index].content}"
+            for index, _ in ranked
+        ]
+        reranked = reranker.rerank(query, candidate_documents, top_k=top_k)
+        return [(ranked[candidate_index][0], score) for candidate_index, score in reranked]
 
     def _coarse_ranker(self) -> TextEmbedder:
         if self.retrieval_mode != "hybrid" or self.dense_embedder is None:
@@ -202,6 +241,16 @@ def build_runbook_query(
         ]
         if part
     )
+
+
+def _runbook_metadata_filter(issue_type: str | None) -> dict | None:
+    if not _runbook_metadata_filter_enabled() or not issue_type or issue_type == "unknown":
+        return None
+    return {"issue_type": issue_type}
+
+
+def _runbook_metadata_filter_enabled() -> bool:
+    return os.getenv("RUNBOOK_METADATA_FILTER", "1").strip().lower() in {"1", "true", "yes"}
 
 
 def serialize_retrieved_chunks(chunks: list[RetrievedRunbookChunk]) -> list[dict]:

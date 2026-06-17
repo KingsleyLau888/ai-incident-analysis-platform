@@ -265,5 +265,165 @@
     "expected_evidence_keywords": ["postgres", "database connection failed"],
     "expected_runbook_sources": ["database_issue.md"],
     "expected_similar_issue_types": ["database_issue"]
+  },
+  {
+    "case_id": "rag-natural-language-payment-provider",
+    "service_name": "checkout-service",
+    "incident_title": "Customers say checkout spins forever",
+    "incident_description": "User reports do not mention timeout explicitly, but logs show payment provider deadline exhaustion.",
+    "logs": [
+      "INFO checkout request accepted",
+      "ERROR payment provider request timed out after 30 seconds",
+      "ERROR checkout retry exhausted for payment-provider-primary"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["payment provider request timed out"],
+    "expected_runbook_sources": ["payment_provider_timeout.md", "timeout_issue.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
+  },
+  {
+    "case_id": "rag-config-secret-database",
+    "service_name": "billing-service",
+    "incident_title": "Billing writes fail after secret rollout",
+    "incident_description": "Billing cannot authenticate to the database after a credentials rotation.",
+    "logs": [
+      "ERROR database authentication failed for billing writer",
+      "ERROR postgres database connection failed after secret rollout",
+      "WARNING config version changed before invoice failure"
+    ],
+    "expected_issue_type": "database_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["database authentication failed", "postgres"],
+    "expected_runbook_sources": ["config_secret_mismatch.md", "postgres_primary_unavailable.md", "database_issue.md"],
+    "expected_similar_issue_types": ["database_issue"]
+  },
+  {
+    "case_id": "rag-network-policy-postgres",
+    "service_name": "order-service",
+    "incident_title": "Order creation stopped after network policy update",
+    "incident_description": "Order service cannot reach its PostgreSQL primary after a network policy change.",
+    "logs": [
+      "ERROR postgres connection failed from order-service",
+      "ERROR database unavailable after network policy rollout",
+      "ERROR order writes failed before commit"
+    ],
+    "expected_issue_type": "database_issue",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["postgres connection failed", "network policy"],
+    "expected_runbook_sources": ["firewall_policy_block.md", "postgres_primary_unavailable.md", "database_issue.md"],
+    "expected_similar_issue_types": ["database_issue"]
+  },
+  {
+    "case_id": "rag-oauth-callback-login",
+    "service_name": "identity-service",
+    "incident_title": "Login redirect does not complete",
+    "incident_description": "Users return from OAuth provider but login sessions are not created.",
+    "logs": [
+      "ERROR auth oauth callback failed with invalid redirect uri",
+      "ERROR token exchange rejected by provider",
+      "INFO login request returned to identity-service"
+    ],
+    "expected_issue_type": "auth_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["auth", "oauth callback failed"],
+    "expected_runbook_sources": ["oauth_callback_failure.md", "auth_issue.md"],
+    "expected_similar_issue_types": ["auth_issue"]
+  },
+  {
+    "case_id": "rag-redis-secret-cache",
+    "service_name": "cart-service",
+    "incident_title": "Cart sessions disappear after Redis password rotation",
+    "incident_description": "Cart service cannot authenticate to Redis after a secret rollout.",
+    "logs": [
+      "ERROR RedisConnection refused while reading cache",
+      "ERROR redis auth failed invalid password",
+      "WARNING secret version changed before cart failures"
+    ],
+    "expected_issue_type": "cache_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["RedisConnection", "redis auth failed"],
+    "expected_runbook_sources": ["config_secret_mismatch.md", "redis_primary_failover.md", "cache_issue.md"],
+    "expected_similar_issue_types": ["cache_issue"]
+  },
+  {
+    "case_id": "rag-cache-stampede-database-noise",
+    "service_name": "catalog-service",
+    "incident_title": "Product catalog latency jumps after hot key expires",
+    "incident_description": "Catalog requests are slow after cache misses overload database reads.",
+    "logs": [
+      "ERROR cache miss spike for hot product key",
+      "WARNING database read rate increased after cache rebuild",
+      "ERROR cache rebuild exceeded request deadline"
+    ],
+    "expected_issue_type": "cache_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["cache miss spike", "hot product key"],
+    "expected_runbook_sources": ["cache_stampede.md", "cache_issue.md"],
+    "expected_similar_issue_types": ["cache_issue"]
+  },
+  {
+    "case_id": "rag-bad-release-serialization",
+    "service_name": "api-service",
+    "incident_title": "API clients receive errors immediately after deploy",
+    "incident_description": "A release caused serialization exceptions and HTTP 500 responses.",
+    "logs": [
+      "ERROR 500 internal server error in request handler",
+      "ERROR failed to serialize response payload after deploy",
+      "WARNING feature flag enabled before error spike"
+    ],
+    "expected_issue_type": "server_error",
+    "expected_severity": "high",
+    "expected_evidence_keywords": ["500", "serialize"],
+    "expected_runbook_sources": ["bad_release_rollback.md", "server_error.md"],
+    "expected_similar_issue_types": ["server_error"]
+  },
+  {
+    "case_id": "rag-queue-lag-not-db",
+    "service_name": "notification-service",
+    "incident_title": "Emails arrive late during campaign",
+    "incident_description": "Notifications are delayed because workers are behind, not because of direct API errors.",
+    "logs": [
+      "ERROR upstream request timed out while waiting for queue worker",
+      "WARNING queue lag increased for notification delivery",
+      "INFO database connection pool healthy"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["timed out", "queue lag"],
+    "expected_runbook_sources": ["message_queue_lag.md", "timeout_issue.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
+  },
+  {
+    "case_id": "rag-dns-provider-timeout",
+    "service_name": "payment-service",
+    "incident_title": "Payments fail only when calling external provider",
+    "incident_description": "Provider calls fail because host resolution and upstream calls time out.",
+    "logs": [
+      "ERROR could not resolve host payment-provider-primary",
+      "ERROR payment provider request timed out after DNS retry",
+      "WARNING fraud API authorization delayed"
+    ],
+    "expected_issue_type": "timeout_issue",
+    "expected_severity": "medium",
+    "expected_evidence_keywords": ["could not resolve host", "timed out"],
+    "expected_runbook_sources": ["dns_resolution_failure.md", "third_party_api_degradation.md", "payment_provider_timeout.md"],
+    "expected_similar_issue_types": ["timeout_issue"]
+  },
+  {
+    "case_id": "rag-benign-rate-limit-warning",
+    "service_name": "api-gateway",
+    "incident_title": "Small number of throttling warnings",
+    "incident_description": "Gateway emitted throttling warnings but no errors or user impact.",
+    "logs": [
+      "WARNING rate limit near threshold for one test client",
+      "INFO checkout requests completed successfully",
+      "INFO no 429 responses emitted"
+    ],
+    "expected_issue_type": "unknown",
+    "expected_severity": "low",
+    "expected_evidence_keywords": [],
+    "expected_runbook_sources": [],
+    "expected_similar_issue_types": []
   }
 ]

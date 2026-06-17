@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -27,6 +28,7 @@ from app.services.llm_judge import JudgeVerdict, get_judge
 EVAL_DIR = PROJECT_ROOT / "eval"
 DEFAULT_CASES_PATH = EVAL_DIR / "eval_cases.json"
 DEFAULT_REPORT_PATH = EVAL_DIR / "eval_report.md"
+DEFAULT_BENCHMARK_REPORT_PATH = EVAL_DIR / "retrieval_benchmark_report.md"
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,7 @@ def run_eval(
         metrics = _aggregate_metrics(case_results)
         report = {
             "retrieval_mode": active_retrieval_mode,
+            "effective_retrieval_modes": _effective_retrieval_modes(case_results),
             "judge_enabled": enable_judge,
             "total_cases": len(cases),
             "metrics": metrics,
@@ -110,6 +113,7 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
         "# Eval Report",
         "",
         f"Retrieval mode: {report.get('retrieval_mode', 'tfidf')}",
+        f"Effective retrieval modes: {', '.join(report.get('effective_retrieval_modes', [])) or 'unknown'}",
         f"LLM Judge: {'enabled' if report.get('judge_enabled') else 'disabled'}",
         "",
         f"Total cases: {report['total_cases']}",
@@ -139,6 +143,8 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
                 f"- actual_runbook_sources: {', '.join(result['actual_runbook_sources']) or '(none)'}",
                 f"- expected_similar_issue_types: {', '.join(result['expected_similar_issue_types']) or '(none)'}",
                 f"- actual_similar_issue_types: {', '.join(result['actual_similar_issue_types']) or '(none)'}",
+                f"- runbook_effective_retrieval_mode: {result['runbook_effective_retrieval_mode']}",
+                f"- similar_effective_retrieval_mode: {result['similar_effective_retrieval_mode']}",
                 f"- evidence_recall: {result['evidence_recall']:.2%}",
                 f"- runbook_retrieval_recall: {result['runbook_retrieval_recall']:.2%}",
                 f"- runbook_top1_correct: {result['runbook_top1_correct']}",
@@ -250,7 +256,11 @@ def _retrieval_mode(mode: str | None):
 def _run_case(db: Session, case: EvalCase):
     # Use case_id suffix to avoid UNIQUE constraint conflicts when
     # multiple eval cases share the same conceptual service name
-    unique_name = f"{case.service_name}-{case.case_id[-8:]}"
+    safe_case_id = "".join(
+        char if char.isalnum() else "-"
+        for char in case.case_id
+    )
+    unique_name = f"{case.service_name}-{safe_case_id}"[:120]
     service = service_service.create_service(db, ServiceCreate(name=unique_name))
     for message in case.logs:
         log_service.create_log_entry(
@@ -281,6 +291,8 @@ def _score_case(
     actual_evidence_messages = [evidence.log_entry.message for evidence in analysis.evidence_logs]
     actual_runbook_sources = [chunk["source"] for chunk in analysis.retrieved_runbook_chunks]
     actual_similar_issue_types = [incident["issue_type"] for incident in analysis.similar_incidents]
+    runbook_effective_mode = _trace_effective_mode(analysis, "vector_runbook_retrieval")
+    similar_effective_mode = _trace_effective_mode(analysis, "similar_incident_retrieval")
     evidence_recall = _keyword_recall(case.expected_evidence_keywords, actual_evidence_messages)
     runbook_recall = _source_recall(case.expected_runbook_sources, actual_runbook_sources)
     similar_incident_recall = _source_recall(case.expected_similar_issue_types, actual_similar_issue_types)
@@ -321,6 +333,8 @@ def _score_case(
         "actual_runbook_sources": actual_runbook_sources,
         "expected_similar_issue_types": case.expected_similar_issue_types,
         "actual_similar_issue_types": actual_similar_issue_types,
+        "runbook_effective_retrieval_mode": runbook_effective_mode,
+        "similar_effective_retrieval_mode": similar_effective_mode,
         "issue_type_match": issue_type_match,
         "severity_match": severity_match,
         "evidence_recall": evidence_recall,
@@ -347,6 +361,32 @@ def _score_case(
         }
 
     return result
+
+
+def _trace_effective_mode(analysis, step_name: str) -> str:
+    traces = getattr(analysis, "traces", []) or []
+    for trace in traces:
+        if trace.step_name != step_name:
+            continue
+        detail = trace.detail or ""
+        match = re.search(r"effective_retrieval_mode=([^;\s.]+)", detail)
+        if match:
+            return match.group(1)
+        match = re.search(r"retrieval_mode=([^;\s.]+)", detail)
+        if match:
+            return match.group(1)
+    return "unknown"
+
+
+def _effective_retrieval_modes(results: list[dict]) -> list[str]:
+    modes = {
+        result.get("runbook_effective_retrieval_mode", "unknown")
+        for result in results
+    } | {
+        result.get("similar_effective_retrieval_mode", "unknown")
+        for result in results
+    }
+    return sorted(mode for mode in modes if mode)
 
 
 def _aggregate_metrics(results: list[dict]) -> dict:
@@ -479,7 +519,9 @@ def main() -> None:
             )
             for mode in modes
         }
+        write_benchmark_report(reports, DEFAULT_BENCHMARK_REPORT_PATH)
         _print_comparison(reports)
+        print(f"\nWrote benchmark report to {DEFAULT_BENCHMARK_REPORT_PATH}")
         return
 
     report = run_eval(
@@ -516,6 +558,88 @@ def _print_comparison(reports: dict[str, dict]) -> None:
                 print(f"{name}: {value:.2f}")
             else:
                 print(f"{name}: {value:.2%}")
+
+
+def write_benchmark_report(
+    reports: dict[str, dict],
+    path: Path = DEFAULT_BENCHMARK_REPORT_PATH,
+) -> None:
+    metric_names = [
+        "issue_type_accuracy",
+        "runbook_top1_accuracy",
+        "runbook_precision_at_3",
+        "similar_incident_top1_accuracy",
+        "similar_incident_precision_at_3",
+        "average_latency_ms",
+        "failed_case_count",
+    ]
+    lines = [
+        "# Retrieval Benchmark Report",
+        "",
+        "This report compares retrieval strategies on the same incident eval cases.",
+        "It is intended to show quality/latency tradeoffs rather than claim production-grade benchmark coverage.",
+        "",
+        "## Compared Modes",
+        "",
+    ]
+    for mode in reports:
+        lines.append(f"- {mode}")
+
+    lines.extend(["", "## Metrics Table", ""])
+    header = "| mode | effective_retrieval_modes | " + " | ".join(metric_names) + " |"
+    separator = "|---" * (len(metric_names) + 2) + "|"
+    lines.extend([header, separator])
+    for mode, report in reports.items():
+        values = []
+        effective_modes = ", ".join(report.get("effective_retrieval_modes", [])) or "unknown"
+        for metric in metric_names:
+            value = report["metrics"][metric]
+            if metric in {"average_latency_ms", "failed_case_count"}:
+                values.append(f"{value:.2f}" if metric == "average_latency_ms" else str(value))
+            else:
+                values.append(f"{value:.2%}")
+        lines.append(f"| {mode} | {effective_modes} | " + " | ".join(values) + " |")
+
+    lines.extend(["", "## Interpretation", ""])
+    best_runbook = _best_mode(reports, "runbook_top1_accuracy", higher_is_better=True)
+    best_similar = _best_mode(reports, "similar_incident_top1_accuracy", higher_is_better=True)
+    fastest = _best_mode(reports, "average_latency_ms", higher_is_better=False)
+    lines.extend(
+        [
+            f"- Best runbook top-1 accuracy: {best_runbook}",
+            f"- Best similar incident top-1 accuracy: {best_similar}",
+            f"- Lowest average latency: {fastest}",
+            "",
+            "TF-IDF tends to be fast and strong on exact error names.",
+            "Dense retrieval can help when the incident title is natural language or does not share exact keywords with the runbook.",
+            "Hybrid retrieval combines sparse and dense ranking with RRF, which is often the most robust option when both exact error terms and semantic hints matter.",
+        ]
+    )
+
+    lines.extend(["", "## Failed Case Overlap", ""])
+    for mode, report in reports.items():
+        failed_ids = [case["case_id"] for case in report["failed_cases"]]
+        lines.append(f"- {mode}: {', '.join(failed_ids) if failed_ids else 'none'}")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _best_mode(
+    reports: dict[str, dict],
+    metric: str,
+    *,
+    higher_is_better: bool,
+) -> str:
+    best = sorted(
+        reports.items(),
+        key=lambda item: item[1]["metrics"][metric],
+        reverse=higher_is_better,
+    )[0]
+    value = best[1]["metrics"][metric]
+    if metric == "average_latency_ms":
+        return f"{best[0]} ({value:.2f} ms)"
+    return f"{best[0]} ({value:.2%})"
 
 
 if __name__ == "__main__":
