@@ -223,3 +223,7 @@ __marimo__/
 *.db
 *.db-journal
 .chroma_db/
+.demo_runtime/
+.claude/
+__pycache__/
+runtime/

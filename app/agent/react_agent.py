@@ -44,8 +44,9 @@ class AgentStep:
 @dataclass
 class AgentResult:
     steps: list[AgentStep]
-    final_diagnosis: dict[str, Any] | None
+    final_diagnosis: Any | None
     provider: str  # "react_llm" | "react_deterministic"
+    final_context: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +68,9 @@ RULES:
 - Start by searching logs to understand the incident.
 - Always detect signals after searching logs.
 - Retrieve runbooks and similar incidents to ground your diagnosis.
+- Use focused investigation tools when the first signals are ambiguous:
+  query_logs_by_keyword, summarize_timeline, compare_log_level_trend,
+  inspect_dependency_signals.
 - Do NOT call the same tool twice with identical parameters.
 - Call `generate_diagnosis` only when you have gathered sufficient evidence."""
 
@@ -116,6 +120,13 @@ def build_react_user_prompt(
             history_lines.append(f"  Observation: {entry['observation'][:300]}")
         history_text = "\n".join(history_lines)
 
+    notes_text = ""
+    notes = history[-5:] if history else []
+    if notes:
+        notes_text = "\n".join(
+            f"  {entry['action']}: {entry['observation'][:220]}" for entry in notes
+        )
+
     return f"""## Incident Context
 
 Title: {incident_title}
@@ -137,6 +148,9 @@ Severity (preliminary): {severity or 'unknown'}
 
 ## Step History
 {history_text or '(start of investigation)'}
+
+## Recent Tool Observations
+{notes_text or '(none yet)'}
 
 ## Current Status
 You are at step {current_step} of {max_steps}.
@@ -200,6 +214,7 @@ class ReActAgent:
             "severity": None,
             "runbook_chunks": [],
             "similar_incidents": [],
+            "investigation_notes": [],
         }
 
         steps: list[AgentStep] = []
@@ -236,6 +251,7 @@ class ReActAgent:
                 return AgentResult(
                     steps=steps,
                     final_diagnosis=diagnosis,
+                    final_context=dict(ctx),
                     provider="react_llm" if self._llm else "react_deterministic",
                 )
 
@@ -284,6 +300,7 @@ class ReActAgent:
         return AgentResult(
             steps=steps,
             final_diagnosis=diagnosis,
+            final_context=dict(ctx),
             provider="react_llm" if self._llm else "react_deterministic",
         )
 
@@ -318,6 +335,9 @@ class ReActAgent:
             thought = result.get("thought", "Proceeding to next step.")
             action = result.get("action", "generate_diagnosis")
             action_input = result.get("action_input", {})
+            allowed_actions = {tool["name"] for tool in TOOL_SCHEMAS}
+            if action not in allowed_actions:
+                action = "generate_diagnosis"
             return thought, action, action_input
         except Exception:
             # Fall back to deterministic on LLM error
@@ -439,6 +459,81 @@ class ReActAgent:
                 sources = [c.source for c in chunks]
                 return f"Retrieved {len(chunks)} runbook chunks: {', '.join(sources) or 'none'}."
 
+            elif action_name == "query_logs_by_keyword":
+                keyword = str(action_input.get("keyword", "")).strip()
+                level = str(action_input.get("level", "")).strip().upper()
+                top_k = int(action_input.get("top_k", 5) or 5)
+                logs = ctx.get("logs", [])
+                matches = []
+                for log in logs:
+                    message = getattr(log, "message", "")
+                    log_level = getattr(log, "level", "")
+                    if keyword.lower() not in message.lower():
+                        continue
+                    if level and log_level.upper() != level:
+                        continue
+                    matches.append(log)
+                ctx.setdefault("investigation_notes", []).append(
+                    f"Keyword search `{keyword}` matched {len(matches)} logs."
+                )
+                preview = "; ".join(getattr(log, "message", "") for log in matches[:top_k])
+                return (
+                    f"Keyword `{keyword}` matched {len(matches)} logs"
+                    + (f": {preview}" if preview else ".")
+                )
+
+            elif action_name == "summarize_timeline":
+                limit = int(action_input.get("limit", 8) or 8)
+                logs = ctx.get("logs", [])
+                selected = logs[:limit]
+                timeline = [
+                    f"{getattr(log, 'timestamp', '')} {getattr(log, 'level', '')}: {getattr(log, 'message', '')}"
+                    for log in selected
+                ]
+                note = f"Timeline built with {len(selected)} of {len(logs)} logs."
+                ctx.setdefault("investigation_notes", []).append(note)
+                return note + (" " + " | ".join(timeline) if timeline else "")
+
+            elif action_name == "compare_log_level_trend":
+                logs = ctx.get("logs", [])
+                midpoint = len(logs) // 2
+                first_half = logs[:midpoint]
+                second_half = logs[midpoint:]
+                first_counts = _level_counts(first_half)
+                second_counts = _level_counts(second_half)
+                first_errors = first_counts.get("ERROR", 0) + first_counts.get("CRITICAL", 0)
+                second_errors = second_counts.get("ERROR", 0) + second_counts.get("CRITICAL", 0)
+                direction = "increased" if second_errors > first_errors else "not increased"
+                observation = (
+                    f"Error trend {direction}: first_half_errors={first_errors}, "
+                    f"second_half_errors={second_errors}, first_counts={first_counts}, "
+                    f"second_counts={second_counts}."
+                )
+                ctx.setdefault("investigation_notes", []).append(observation)
+                return observation
+
+            elif action_name == "inspect_dependency_signals":
+                dependency_terms = [
+                    "mysql", "postgres", "database", "dbconnection", "redis",
+                    "cache", "auth", "token", "payment-provider", "upstream",
+                    "connection pool", "shop-primary", "mysql-primary",
+                ]
+                logs = ctx.get("logs", [])
+                counts = {}
+                for term in dependency_terms:
+                    count = sum(
+                        1 for log in logs
+                        if term.lower() in getattr(log, "message", "").lower()
+                    )
+                    if count:
+                        counts[term] = count
+                observation = (
+                    f"Dependency signals found: {counts}."
+                    if counts else "No known dependency signals found in logs."
+                )
+                ctx.setdefault("investigation_notes", []).append(observation)
+                return observation
+
             elif action_name == "retrieve_similar_incidents":
                 query = action_input.get("query") or build_retrieval_query(
                     incident_title, service_name, ctx
@@ -480,3 +575,11 @@ def build_retrieval_query(
         ]
         if part
     )
+
+
+def _level_counts(logs: list[LogEntry]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for log in logs:
+        level = getattr(log, "level", "UNKNOWN").upper()
+        counts[level] = counts.get(level, 0) + 1
+    return counts

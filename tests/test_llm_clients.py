@@ -137,6 +137,218 @@ def test_openai_compatible_valid_response_uses_real_provider():
     assert "similar_incidents" in user_context
 
 
+def test_openai_compatible_decide_action_parses_agent_tool_choice():
+    captured_payload = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_payload.update(json.loads(request.content))
+        content = {
+            "thought": "I need the recent service logs first.",
+            "action": "search_logs",
+            "action_input": {"service_name": "payment-service"},
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(content)}}]},
+        )
+
+    http_client = httpx.Client(
+        base_url="http://llm.test/v1/",
+        transport=httpx.MockTransport(handler),
+    )
+    client = OpenAICompatibleClient(
+        api_key="test-key",
+        base_url="http://llm.test/v1",
+        model="test-model",
+        http_client=http_client,
+    )
+
+    decision = client.decide_action("system prompt", "user prompt")
+
+    assert captured_payload["response_format"] == {"type": "json_object"}
+    assert decision["action"] == "search_logs"
+    assert decision["action_input"]["service_name"] == "payment-service"
+
+
+def test_react_agent_mode_uses_agent_selected_tools(client, monkeypatch):
+    class FakeAgentLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def decide_action(self, system_prompt: str, user_prompt: str) -> dict:
+            self.calls += 1
+            actions = [
+                {
+                    "thought": "Start by searching service logs.",
+                    "action": "search_logs",
+                    "action_input": {"service_name": "payment-service"},
+                },
+                {
+                    "thought": "Classify the signals from the retrieved logs.",
+                    "action": "detect_signals",
+                    "action_input": {},
+                },
+                {
+                    "thought": "The evidence is enough for a diagnosis.",
+                    "action": "generate_diagnosis",
+                    "action_input": {},
+                },
+            ]
+            return actions[min(self.calls - 1, len(actions) - 1)]
+
+    monkeypatch.setenv("REACT_AGENT_ENABLED", "1")
+    monkeypatch.setattr(analysis_service, "_get_react_llm_client", lambda: FakeAgentLLM())
+
+    service = client.post("/services", json={"name": "payment-service"}).json()
+    client.post(
+        "/logs",
+        json={
+            "service_id": service["id"],
+            "level": "ERROR",
+            "message": "DBConnectionTimeout while connecting to mysql-primary",
+        },
+    )
+    incident = client.post(
+        "/incidents",
+        json={"service_id": service["id"], "title": "Payment API errors"},
+    ).json()
+
+    response = client.post(f"/incidents/{incident['id']}/analyze")
+
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["retrieved_runbook_chunks"] == []
+    assert analysis["similar_incidents"] == []
+    assert analysis["analysis_plan"]["tool_steps"] == [
+        "search_logs",
+        "detect_signals",
+        "generate_diagnosis",
+    ]
+
+    trace = client.get(f"/incidents/{incident['id']}/trace").json()
+    assert trace[0]["step_name"] == "analysis_mode_routing"
+    assert "selected_mode=agent" in trace[0]["detail"]
+    assert trace[1]["step_name"] == "react_agent_context"
+    assert "Agent mode: react_llm" in trace[1]["detail"]
+
+
+def test_react_agent_can_use_focused_investigation_tools(client, monkeypatch):
+    class FakeAgentLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def decide_action(self, system_prompt: str, user_prompt: str) -> dict:
+            self.calls += 1
+            actions = [
+                {
+                    "thought": "Collect the service logs first.",
+                    "action": "search_logs",
+                    "action_input": {"service_name": "payment-service"},
+                },
+                {
+                    "thought": "Classify the main failure signal.",
+                    "action": "detect_signals",
+                    "action_input": {},
+                },
+                {
+                    "thought": "The title says 500, but I need to verify the database dependency.",
+                    "action": "query_logs_by_keyword",
+                    "action_input": {"keyword": "mysql-primary", "top_k": 5},
+                },
+                {
+                    "thought": "Check whether dependency terms point to a downstream root cause.",
+                    "action": "inspect_dependency_signals",
+                    "action_input": {},
+                },
+                {
+                    "thought": "Now generate the diagnosis from the investigated evidence.",
+                    "action": "generate_diagnosis",
+                    "action_input": {},
+                },
+            ]
+            return actions[min(self.calls - 1, len(actions) - 1)]
+
+    monkeypatch.setenv("REACT_AGENT_ENABLED", "1")
+    monkeypatch.setattr(analysis_service, "_get_react_llm_client", lambda: FakeAgentLLM())
+
+    service = client.post("/services", json={"name": "payment-service"}).json()
+    for message in [
+        "INFO payment request started",
+        "ERROR Payment API returned 500",
+        "ERROR DBConnectionTimeout while connecting to mysql-primary",
+    ]:
+        client.post(
+            "/logs",
+            json={
+                "service_id": service["id"],
+                "level": "ERROR" if message.startswith("ERROR") else "INFO",
+                "message": message,
+            },
+        )
+    incident = client.post(
+        "/incidents",
+        json={"service_id": service["id"], "title": "Payment API returns 500 errors"},
+    ).json()
+
+    response = client.post(f"/incidents/{incident['id']}/analyze")
+
+    assert response.status_code == 201
+    tool_steps = response.json()["analysis_plan"]["tool_steps"]
+    assert "query_logs_by_keyword" in tool_steps
+    assert "inspect_dependency_signals" in tool_steps
+
+    trace = client.get(f"/incidents/{incident['id']}/trace").json()
+    trace_text = "\n".join(step["detail"] for step in trace)
+    assert "Keyword `mysql-primary` matched 1 logs" in trace_text
+    assert "Dependency signals found" in trace_text
+
+
+def test_auto_mode_routes_complex_incident_to_agent(client, monkeypatch):
+    class FakeAgentLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def decide_action(self, system_prompt: str, user_prompt: str) -> dict:
+            self.calls += 1
+            actions = [
+                {"thought": "Start with logs.", "action": "search_logs", "action_input": {}},
+                {"thought": "Classify signals.", "action": "detect_signals", "action_input": {}},
+                {
+                    "thought": "The 500 may be a symptom, inspect dependencies.",
+                    "action": "inspect_dependency_signals",
+                    "action_input": {},
+                },
+                {"thought": "Finish.", "action": "generate_diagnosis", "action_input": {}},
+            ]
+            return actions[min(self.calls - 1, len(actions) - 1)]
+
+    monkeypatch.delenv("REACT_AGENT_ENABLED", raising=False)
+    monkeypatch.setenv("ANALYSIS_MODE", "auto")
+    monkeypatch.setattr(analysis_service, "_get_react_llm_client", lambda: FakeAgentLLM())
+
+    service = client.post("/services", json={"name": "payment-service"}).json()
+    for message in [
+        "ERROR Payment API returned 500",
+        "ERROR DBConnectionTimeout while connecting to mysql-primary",
+    ]:
+        client.post(
+            "/logs",
+            json={"service_id": service["id"], "level": "ERROR", "message": message},
+        )
+    incident = client.post(
+        "/incidents",
+        json={"service_id": service["id"], "title": "Payment API returns 500 errors"},
+    ).json()
+
+    response = client.post(f"/incidents/{incident['id']}/analyze")
+
+    assert response.status_code == 201
+    trace = client.get(f"/incidents/{incident['id']}/trace").json()
+    assert trace[0]["step_name"] == "analysis_mode_routing"
+    assert "selected_mode=agent" in trace[0]["detail"]
+    assert "server_error appears to be a symptom" in trace[0]["detail"]
+
+
 def test_analyze_trace_records_mock_fallback(client, monkeypatch):
     class FailingClient:
         def diagnose(self, **kwargs):

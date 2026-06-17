@@ -95,6 +95,29 @@ class OpenAICompatibleClient:
         diagnosis = StructuredDiagnosis.model_validate_json(_strip_json_fence(content))
         return DiagnosisResult(diagnosis=diagnosis, provider="openai_compatible")
 
+    def decide_action(self, system_prompt: str, user_prompt: str) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        }
+        response = self._post(payload)
+        content = response["choices"][0]["message"]["content"]
+        result = json.loads(_strip_json_fence(content))
+        if not isinstance(result, dict):
+            raise ValueError("LLM agent decision must be a JSON object")
+        if "action" not in result:
+            raise ValueError("LLM agent decision is missing action")
+        result.setdefault("thought", "Choosing the next incident analysis tool.")
+        result.setdefault("action_input", {})
+        if not isinstance(result["action_input"], dict):
+            result["action_input"] = {}
+        return result
+
     def _post(self, payload: dict) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         if self.http_client is not None:

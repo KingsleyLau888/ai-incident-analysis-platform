@@ -29,6 +29,33 @@ curl.exe -X POST http://127.0.0.1:8001/payments
 
 Python 应用和 Fluent Bit 的接入方式见 `integrations/README.md`。
 
+## Demo Shop System
+
+如果希望演示“用户操作业务系统，工程师在 Incident 平台查看故障”，可以启动完整 Shop Demo：
+
+终端 1，启动 Incident 平台：
+
+```powershell
+$env:DATABASE_URL="sqlite:///$($env:TEMP.Replace('\','/'))/incident-live.db"
+uvicorn app.main:app --reload --port 8010
+```
+
+终端 2，启动 Shop 系统：
+
+```powershell
+$env:INCIDENT_API_URL="http://127.0.0.1:8010"
+uvicorn demo_shop_system.app:app --reload --port 8020
+```
+
+访问：
+
+```text
+Shop 用户页面: http://127.0.0.1:8020
+工程师监控台: http://127.0.0.1:8010
+```
+
+在 Shop 页面点击 Checkout 会执行真实的库存/订单数据库写入。打开“数据库故障”“支付超时”或“认证失败”后再次 Checkout，Shop 后端会产生错误日志并自动发送给 Incident 平台；平台会自动创建 Incident、执行 Analysis Job，并在 Dashboard 展示诊断结果。
+
 面向 AIOps 场景的智能故障诊断后端系统。
 
 本项目围绕 Incident Analysis Pipeline，结合规则信号检测、证据日志提取、Runbook Retrieval、可插拔 LLM 结构化诊断、Trace 和离线 Eval Harness，演示一次事故从日志分析到诊断结果生成的完整后端流程。

@@ -18,6 +18,7 @@ from datetime import UTC, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.agent.analysis_mode_router import AnalysisModeRouter
 from app.agent.diagnosis_planner import DiagnosisPlanner
 from app.agent.react_agent import AgentResult, ReActAgent
 from app.llm.factory import get_llm_client
@@ -38,10 +39,19 @@ from app.services.similar_incident_retriever import (
     serialize_similar_incidents,
 )
 
+
+class _AgentObservationLog:
+    def __init__(self, message: str) -> None:
+        self.id = 0
+        self.level = "INFO"
+        self.message = message
+        self.timestamp = None
+
 PIPELINE_TRACE_STEPS = (
     "log_filtering",
     "rule_detection",
     "evidence_selection",
+    "analysis_mode_routing",
     "query_rewriting",
     "planner_decision",
     "vector_runbook_retrieval",
@@ -73,7 +83,8 @@ def detect_features() -> dict[str, bool | str]:
         "cross_encoder_enabled": CROSS_ENCODER_ENABLED and has_reranker,
         "query_rewriting_enabled": True,  # always active (template fallback)
         "query_rewriting_provider": "llm" if _has_real_llm() else "template",
-        "react_agent_enabled": _use_react_agent(),
+        "analysis_mode": _requested_analysis_mode(),
+        "react_agent_enabled": _agent_allowed(),
         "chromadb_available": retrieval_mode == "chromadb" and has_dense,
         "sentence_transformer_available": has_dense,
         "llm_provider": os.getenv("LLM_PROVIDER", "mock"),
@@ -144,10 +155,18 @@ def analyze_incident(
     )
 
     features = detect_features()
+    agent_client = _get_react_llm_client() if _agent_allowed() else None
+    mode_decision = AnalysisModeRouter().route(
+        incident_title=incident.title,
+        logs=logs,
+        detection=detection,
+        requested_mode=_requested_analysis_mode(),
+        agent_available=agent_client is not None,
+    )
 
     # Choose analysis mode
-    if features["react_agent_enabled"]:
-        _report(progress_callback, "agent_investigation", "Running ReAct investigation.")
+    if mode_decision.mode == "agent":
+        _report(progress_callback, "agent_investigation", mode_decision.reason)
         retrieved_runbook_chunks, similar_incidents, react_result, diagnosis_result = (
             _run_react_agent(
                 incident=incident,
@@ -156,6 +175,7 @@ def analyze_incident(
                 logs=logs,
                 runbook_retriever=runbook_retriever,
                 similar_incident_retriever=similar_incident_retriever,
+                llm_client=agent_client,
             )
         )
     else:
@@ -194,7 +214,13 @@ def analyze_incident(
     )
     analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
     analysis_run.set_similar_incidents(serialize_similar_incidents(similar_incidents))
-    analysis_run.set_analysis_plan(diagnosis_plan.analysis_plan, diagnosis_plan.tool_steps)
+    plan_text, tool_steps = _analysis_plan_from_result(
+        diagnosis_plan=diagnosis_plan,
+        react_result=react_result,
+        incident_title=incident.title,
+        service_name=service_name,
+    )
+    analysis_run.set_analysis_plan(plan_text, tool_steps)
     analysis_run.set_structured_diagnosis(
         diagnosis_summary=structured_diagnosis.diagnosis_summary,
         root_cause_hypotheses=[
@@ -218,12 +244,14 @@ def analyze_incident(
 
     # Build trace
     if react_result is not None:
-        _persist_react_trace(db, analysis_run.id, react_result, logs, detection, diagnosis_result)
+        _persist_react_trace(
+            db, analysis_run.id, react_result, logs, detection, diagnosis_result, mode_decision
+        )
     else:
         _persist_pipeline_trace(
             db, analysis_run.id, logs, detection, diagnosis_plan,
             retrieved_runbook_chunks, similar_incidents, diagnosis_result,
-            runbook_retriever, similar_incident_retriever, features,
+            runbook_retriever, similar_incident_retriever, features, mode_decision,
         )
 
     db.commit()
@@ -231,7 +259,7 @@ def analyze_incident(
     if saved_analysis_run is not None:
         saved_analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))
         saved_analysis_run.set_similar_incidents(serialize_similar_incidents(similar_incidents))
-        saved_analysis_run.set_analysis_plan(diagnosis_plan.analysis_plan, diagnosis_plan.tool_steps)
+        saved_analysis_run.set_analysis_plan(plan_text, tool_steps)
         saved_analysis_run.set_structured_diagnosis(
             diagnosis_summary=structured_diagnosis.diagnosis_summary,
             root_cause_hypotheses=[
@@ -373,13 +401,22 @@ def _incident_doc(incident) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _use_react_agent() -> bool:
-    return os.getenv("REACT_AGENT_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+def _requested_analysis_mode() -> str:
+    explicit = os.getenv("ANALYSIS_MODE")
+    if explicit:
+        return explicit.strip().lower()
+    if os.getenv("REACT_AGENT_ENABLED", "0").strip().lower() in {"1", "true", "yes"}:
+        return "agent"
+    return "auto"
+
+
+def _agent_allowed() -> bool:
+    return _requested_analysis_mode() in {"auto", "agent"}
 
 
 def _run_react_agent(
     incident, service_name, detection, logs,
-    runbook_retriever, similar_incident_retriever,
+    runbook_retriever, similar_incident_retriever, llm_client,
 ):
     def search_logs_fn(ctx): return logs
     def detect_signals_fn(ctx):
@@ -397,15 +434,19 @@ def _run_react_agent(
             issue_type=detection.issue_type, evidence_logs=detection.evidence_logs,
             top_k=top_k)
     def generate_diagnosis_fn(ctx):
+        evidence_logs = list(ctx.get("evidence_logs", detection.evidence_logs))
+        evidence_logs.extend(
+            _AgentObservationLog(f"Agent investigation note: {note}")
+            for note in ctx.get("investigation_notes", [])
+        )
         return get_llm_client().diagnose(
             incident_title=incident.title, service_name=service_name,
             issue_type=ctx.get("issue_type", detection.issue_type),
             severity=ctx.get("severity", detection.severity),
-            evidence_logs=ctx.get("evidence_logs", detection.evidence_logs),
+            evidence_logs=evidence_logs,
             retrieved_runbook_chunks=ctx.get("runbook_chunks", []),
             similar_incidents=ctx.get("similar_incidents", []))
 
-    llm_client = _get_react_llm_client()
     agent = ReActAgent(llm_client=llm_client)
     result = agent.investigate(
         incident_title=incident.title, service_name=service_name,
@@ -414,13 +455,10 @@ def _run_react_agent(
         retrieve_similar_incidents_fn=retrieve_similar_incidents_fn,
         generate_diagnosis_fn=generate_diagnosis_fn)
 
-    retrieved = runbook_retriever.retrieve(
-        incident_title=incident.title, service_name=service_name,
-        evidence_logs=detection.evidence_logs, issue_type=detection.issue_type)
-    sim = similar_incident_retriever.retrieve(
-        incident_title=incident.title, service_name=service_name,
-        issue_type=detection.issue_type, evidence_logs=detection.evidence_logs)
-    diagnosis_result = generate_diagnosis_fn({})
+    final_context = result.final_context or {}
+    retrieved = final_context.get("runbook_chunks", [])
+    sim = final_context.get("similar_incidents", [])
+    diagnosis_result = result.final_diagnosis or generate_diagnosis_fn(final_context)
     return retrieved, sim, result, diagnosis_result
 
 
@@ -436,14 +474,39 @@ def _get_react_llm_client():
     except Exception: return None
 
 
+def _analysis_plan_from_result(
+    diagnosis_plan,
+    react_result: AgentResult | None,
+    incident_title: str,
+    service_name: str,
+) -> tuple[str, list[str]]:
+    if react_result is None:
+        return diagnosis_plan.analysis_plan, diagnosis_plan.tool_steps
+
+    tool_steps = [
+        step.action for step in react_result.steps
+        if step.action is not None
+    ]
+    plan_text = (
+        f"ReAct agent investigated '{incident_title}' for {service_name}. "
+        f"It selected tools dynamically via {react_result.provider}: "
+        f"{', '.join(tool_steps)}."
+    )
+    return plan_text, tool_steps
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Trace persistence
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _persist_react_trace(db, analysis_run_id, react_result, logs, detection, diagnosis_result):
+def _persist_react_trace(
+    db, analysis_run_id, react_result, logs, detection, diagnosis_result, mode_decision
+):
     steps_data = [
-        ("react_agent_context", 0,
+        ("analysis_mode_routing", 0,
+         f"selected_mode=agent; reason={mode_decision.reason}."),
+        ("react_agent_context", 1,
          f"Agent mode: {react_result.provider}; total_steps={len(react_result.steps)}; "
          f"logs_count={len(logs)}; issue_type={detection.issue_type}"),
     ]
@@ -454,9 +517,9 @@ def _persist_react_trace(db, analysis_run_id, react_result, logs, detection, dia
             f"Input: {step.action_input}" if step.action_input else "",
             f"Observation: {step.observation}",
         ]))
-        steps_data.append((f"react_step_{step.step_number}", step.step_number, detail))
+        steps_data.append((f"react_step_{step.step_number}", step.step_number + 1, detail))
     steps_data.append(
-        ("summary_generation", len(react_result.steps) + 1,
+        ("summary_generation", len(react_result.steps) + 2,
          f"Generated structured diagnosis; provider={diagnosis_result.provider}."))
     for step_name, step_order, detail in steps_data:
         db.add(AnalysisTrace(analysis_run_id=analysis_run_id, step_name=step_name,
@@ -466,7 +529,7 @@ def _persist_react_trace(db, analysis_run_id, react_result, logs, detection, dia
 def _persist_pipeline_trace(
     db, analysis_run_id, logs, detection, diagnosis_plan,
     retrieved_runbook_chunks, similar_incidents, diagnosis_result,
-    runbook_retriever, similar_incident_retriever, features,
+    runbook_retriever, similar_incident_retriever, features, mode_decision,
 ):
     from app.services.embedding_service import get_last_retrieval_timing
 
@@ -479,6 +542,7 @@ def _persist_pipeline_trace(
         "log_filtering": f"Selected {len(logs)} logs for service.",
         "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
         "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
+        "analysis_mode_routing": f"selected_mode={mode_decision.mode}; reason={mode_decision.reason}.",
         "query_rewriting": f"Query rewriting: provider={features['query_rewriting_provider']}, variants={','.join(features.get('_rewritten_variants', ['(original)']))}.",
         "planner_decision": f"Planner selected tool_steps={diagnosis_plan.tool_steps}.",
         "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks; {runbook_retriever.retrieval_detail}{rerank_info}.",

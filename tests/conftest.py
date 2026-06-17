@@ -15,6 +15,12 @@ from app.services.embedding_service import get_sentence_transformer_embedder
 def isolate_retrieval_environment(monkeypatch):
     monkeypatch.delenv("RETRIEVAL_MODE", raising=False)
     monkeypatch.delenv("RUNBOOK_EMBEDDING_BACKEND", raising=False)
+    monkeypatch.delenv("ANALYSIS_MODE", raising=False)
+    monkeypatch.delenv("REACT_AGENT_ENABLED", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
     get_sentence_transformer_embedder.cache_clear()
     yield
     get_sentence_transformer_embedder.cache_clear()

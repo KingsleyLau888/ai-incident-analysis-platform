@@ -89,6 +89,76 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "query_logs_by_keyword",
+        "description": (
+            "Search within the already collected service logs using a keyword or phrase. "
+            "Use this when you need to verify a suspected dependency, error code, "
+            "or symptom such as mysql, timeout, auth, redis, 500, or connection pool."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keyword": {
+                    "type": "string",
+                    "description": "Keyword or phrase to search for in log messages.",
+                },
+                "level": {
+                    "type": "string",
+                    "description": "Optional log level filter, for example ERROR or WARN.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Maximum matching log lines to return.",
+                    "default": 5,
+                },
+            },
+            "required": ["keyword"],
+        },
+    },
+    {
+        "name": "summarize_timeline",
+        "description": (
+            "Build a short chronological timeline from collected logs. "
+            "Use this to understand whether errors appeared before or after normal requests."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum timeline entries to include.",
+                    "default": 8,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "compare_log_level_trend",
+        "description": (
+            "Compare log level counts between the first half and second half of the "
+            "analysis window. Use this to check whether errors are increasing."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "inspect_dependency_signals",
+        "description": (
+            "Inspect logs for dependency names and infrastructure signals, such as "
+            "mysql, postgres, redis, cache, auth, payment-provider, upstream, or database. "
+            "Use this when the root cause may be in a downstream dependency."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
         "name": "retrieve_similar_incidents",
         "description": (
             "Search historical incidents for similar past cases. "
