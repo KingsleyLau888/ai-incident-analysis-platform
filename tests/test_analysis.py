@@ -21,8 +21,11 @@ def test_analyze_database_issue(client: TestClient):
     assert analysis["severity"] == "high"
     assert analysis["summary"] == "Detected database_issue in payment-service based on related error logs."
     assert analysis["suggested_actions"] == "Check database availability, connection pool, and credentials."
-    assert len(analysis["evidence_logs"]) == 1
-    assert "DBConnection" in analysis["evidence_logs"][0]["log_entry"]["message"]
+    evidence_messages = [
+        evidence["log_entry"]["message"] for evidence in analysis["evidence_logs"]
+    ]
+    assert len(evidence_messages) >= 2
+    assert any("DBConnection" in message for message in evidence_messages)
     assert "payment-service is showing signs of database issue" in analysis["diagnosis_summary"]
     assert analysis["root_cause_hypotheses"]
     assert analysis["impact_scope"] == "Likely impact is scoped to payment-service and its directly related dependencies."
@@ -50,7 +53,7 @@ def test_analyze_timeout_issue(client: TestClient):
     assert analysis["issue_type"] == "timeout_issue"
     assert analysis["severity"] == "medium"
     assert analysis["suggested_actions"] == "Check upstream latency and timeout settings."
-    assert len(analysis["evidence_logs"]) == 1
+    assert len(analysis["evidence_logs"]) >= 1
 
 
 def test_get_analysis(client: TestClient):
@@ -104,6 +107,9 @@ def test_get_trace(client: TestClient):
     assert [step["step_order"] for step in trace] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     routing_step = next(step for step in trace if step["step_name"] == "analysis_mode_routing")
     assert "selected_mode=pipeline" in routing_step["detail"]
+    rule_step = next(step for step in trace if step["step_name"] == "rule_detection")
+    assert "confidence=" in rule_step["detail"]
+    assert "scores=" in rule_step["detail"]
     summary_step = next(step for step in trace if step["step_name"] == "summary_generation")
     assert "provider=mock" in summary_step["detail"]
 

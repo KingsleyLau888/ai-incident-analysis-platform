@@ -1,17 +1,55 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Incident Copilot</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Incident Copilot</title>
 <style>
-:root{--bg:#f4f6f8;--panel:#fff;--ink:#17202a;--muted:#66717d;--line:#dce1e6;--blue:#1769aa;--green:#26834a;--red:#c43d3d;--amber:#a96800}*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;letter-spacing:0}header{height:64px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 24px}h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 12px}a{color:var(--blue);text-decoration:none}.status{display:flex;gap:9px;align-items:center;color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--amber)}.dot.live{background:var(--green)}main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:var(--panel)}.metric{padding:14px 18px;border-right:1px solid var(--line)}.metric:last-child{border:0}.metric strong{font-size:24px;display:block}.metric span{color:var(--muted);font-size:12px}.top-grid{display:grid;grid-template-columns:1fr 1.35fr 1.35fr;gap:16px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;min-width:0}.list{max-height:300px;overflow:auto}.row{padding:10px 8px;border-top:1px solid #edf0f2;cursor:pointer}.row:first-child{border-top:0}.row:hover,.row.selected{background:#eef5fb}.row-head{display:flex;justify-content:space-between;gap:10px}.row small{color:var(--muted);display:block;margin-top:3px}.badge{font-size:11px;padding:2px 7px;border-radius:10px;background:#edf0f2;white-space:nowrap}.high,.failed{background:#fbe9e9;color:var(--red)}.medium,.running{background:#fff3da;color:var(--amber)}.succeeded,.open{background:#e7f5ec;color:var(--green)}.pending{background:#e8f1fa;color:var(--blue)}.bottom-grid{display:grid;grid-template-columns:1.1fr 1.9fr;gap:16px}.logs{height:420px;overflow:auto;font-family:Consolas,monospace;font-size:12px;background:#101418;color:#d8dee4;padding:10px;border-radius:4px}.log{padding:5px 0;border-bottom:1px solid #252b31}.log .ERROR,.log .CRITICAL{color:#ff7777}.log .INFO{color:#75baff}.diagnosis{min-height:420px}.empty{color:var(--muted);padding:28px 4px}.section{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.hypothesis{padding:9px 0;border-bottom:1px solid #edf0f2}.actions{padding-left:20px}.trace{display:grid;gap:7px}.trace div{border-left:3px solid var(--blue);padding-left:9px}.trace small{color:var(--muted);display:block}.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.job-progress{height:5px;background:#e5e9ed;margin-top:7px}.job-progress i{display:block;height:100%;background:var(--blue)}@media(max-width:980px){.top-grid,.bottom-grid{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}}
+:root{--bg:#f4f6f8;--panel:#fff;--ink:#17202a;--muted:#66717d;--line:#dce1e6;--blue:#1769aa;--green:#26834a;--red:#c43d3d;--amber:#a96800}
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;letter-spacing:0}
+header{height:64px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+h1{font-size:20px;margin:0}h2{font-size:15px;margin:0 0 12px}h3{font-size:13px;margin:0 0 8px;color:#384453}a{color:var(--blue);text-decoration:none}
+.muted{color:var(--muted)}.status{display:flex;gap:10px;align-items:center;color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--amber)}.dot.live{background:var(--green)}
+main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);background:var(--panel)}
+.metric{padding:14px 18px;border-right:1px solid var(--line)}.metric:last-child{border:0}.metric strong{font-size:24px;display:block}.metric span{color:var(--muted);font-size:12px}
+.layout{display:grid;grid-template-columns:360px 1fr;gap:16px}.left,.right{display:grid;gap:16px;align-content:start}.panel{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:14px;min-width:0}
+.list{max-height:280px;overflow:auto}.row{padding:10px 8px;border-top:1px solid #edf0f2;cursor:pointer}.row:first-child{border-top:0}.row:hover,.row.selected{background:#eef5fb}
+.row-head{display:flex;justify-content:space-between;gap:10px}.row small{color:var(--muted);display:block;margin-top:3px}.badge{font-size:11px;padding:2px 7px;border-radius:10px;background:#edf0f2;white-space:nowrap}
+.high,.failed{background:#fbe9e9;color:var(--red)}.medium,.running{background:#fff3da;color:var(--amber)}.succeeded,.open{background:#e7f5ec;color:var(--green)}.pending{background:#e8f1fa;color:var(--blue)}
+.logs{height:330px;overflow:auto;font-family:Consolas,monospace;font-size:12px;background:#101418;color:#d8dee4;padding:10px;border-radius:5px}.log{padding:5px 0;border-bottom:1px solid #252b31}.log .ERROR,.log .CRITICAL{color:#ff7777}.log .INFO{color:#75baff}
+.diagnosis{display:grid;gap:14px}.summary{border-left:4px solid var(--blue);padding:12px 14px;background:#f7fbff;border-radius:5px}.summary h2{font-size:18px;line-height:1.45}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.section{border-top:1px solid var(--line);padding-top:12px}.item{padding:9px 0;border-bottom:1px solid #edf0f2}.item:last-child{border-bottom:0}.item small{color:var(--muted);display:block;margin-top:4px}.actions{padding-left:20px;margin:0}
+.trace{display:grid;gap:7px}.trace div{border-left:3px solid var(--blue);padding-left:9px}.trace small{color:var(--muted);display:block;line-height:1.45}.toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.job-progress{height:5px;background:#e5e9ed;margin-top:7px}.job-progress i{display:block;height:100%;background:var(--blue)}.empty{color:var(--muted);padding:22px 4px}
+@media(max-width:1050px){.layout,.grid2{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
-<header><div><h1>AI Incident Copilot</h1><span style="color:var(--muted)">实时故障诊断</span></div><div class="status"><span id="live-dot" class="dot"></span><span id="live-text">连接中</span><a href="/dev-tools">开发工具</a><a href="/docs">API</a></div></header>
+<header>
+  <div><h1>AI Incident Copilot</h1><span class="muted">实时故障诊断</span></div>
+  <div class="status"><span id="live-dot" class="dot"></span><span id="live-text">连接中</span><a href="/dev-tools">开发工具</a><a href="/docs">API</a></div>
+</header>
 <main>
-<section class="metrics"><div class="metric"><strong id="m-services">0</strong><span>服务</span></div><div class="metric"><strong id="m-errors">0</strong><span>最近错误日志</span></div><div class="metric"><strong id="m-incidents">0</strong><span>开放事故</span></div><div class="metric"><strong id="m-running">0</strong><span>分析任务</span></div></section>
-<section class="top-grid"><div class="panel"><h2>服务状态</h2><div id="services" class="list"></div></div><div class="panel"><h2>实时 Incident</h2><div id="incidents" class="list"></div></div><div class="panel"><h2>Analysis Jobs</h2><div id="jobs" class="list"></div></div></section>
-<section class="bottom-grid"><div class="panel"><div class="toolbar"><h2>实时日志</h2><span id="log-count" class="badge">0</span></div><div id="logs" class="logs"></div></div><div class="panel diagnosis"><div class="toolbar"><h2>诊断详情</h2><span id="selected-label" class="badge">未选择</span></div><div id="diagnosis" class="empty">等待自动 Incident。</div></div></section>
+  <section class="metrics">
+    <div class="metric"><strong id="m-services">0</strong><span>服务</span></div>
+    <div class="metric"><strong id="m-errors">0</strong><span>最近错误日志</span></div>
+    <div class="metric"><strong id="m-incidents">0</strong><span>开放事故</span></div>
+    <div class="metric"><strong id="m-running">0</strong><span>分析任务</span></div>
+  </section>
+  <section class="layout">
+    <div class="left">
+      <div class="panel"><h2>服务状态</h2><div id="services" class="list"></div></div>
+      <div class="panel"><h2>实时 Incident</h2><div id="incidents" class="list"></div></div>
+      <div class="panel"><h2>Analysis Jobs</h2><div id="jobs" class="list"></div></div>
+      <div class="panel"><div class="toolbar"><h2>实时日志</h2><span id="log-count" class="badge">0</span></div><div id="logs" class="logs"></div></div>
+    </div>
+    <div class="right">
+      <div class="panel diagnosis">
+        <div class="toolbar"><h2>诊断详情</h2><span id="selected-label" class="badge">未选择</span></div>
+        <div id="diagnosis" class="empty">等待自动 Incident。</div>
+      </div>
+    </div>
+  </section>
 </main>
 <script>
 const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,loadedAnalysis:null};
@@ -21,10 +59,41 @@ const source=new EventSource('/events');
 source.addEventListener('snapshot',e=>{Object.assign(state,JSON.parse(e.data));document.querySelector('#live-dot').classList.add('live');document.querySelector('#live-text').textContent='实时连接';render()});
 source.onerror=()=>{document.querySelector('#live-dot').classList.remove('live');document.querySelector('#live-text').textContent='正在重连'};
 function progress(s,p){if(s==='succeeded'||s==='failed')return 100;if(s==='pending')return 8;return {loading_incident:15,log_filtering:28,rule_detection:40,planner_decision:52,knowledge_retrieval:68,summary_generation:82,persistence:94}[p]||20}
-function render(){document.querySelector('#m-services').textContent=state.services.length;document.querySelector('#m-errors').textContent=state.logs.filter(x=>['ERROR','CRITICAL'].includes(x.level.toUpperCase())).length;document.querySelector('#m-incidents').textContent=state.incidents.filter(x=>x.status==='open').length;document.querySelector('#m-running').textContent=state.jobs.filter(x=>['pending','running'].includes(x.status)).length;document.querySelector('#services').innerHTML=state.services.map(s=>`<div class="row"><div class="row-head"><b>${esc(s.name)}</b><span class="badge succeeded">接入</span></div><small>${esc(s.description||'')}</small></div>`).join('')||'<div class="empty">暂无服务</div>';const incidents=[...state.incidents].reverse();if(!state.selectedIncident&&incidents.length)selectIncident(incidents[0].id,false);document.querySelector('#incidents').innerHTML=incidents.map(i=>`<div class="row ${state.selectedIncident===i.id?'selected':''}" onclick="selectIncident(${i.id})"><div class="row-head"><b>${esc(i.title)}</b><span class="badge ${esc(i.status)}">${esc(i.status)}</span></div><small>${tm(i.created_at)} · service ${i.service_id}</small></div>`).join('')||'<div class="empty">暂无 Incident</div>';document.querySelector('#jobs').innerHTML=state.jobs.map(j=>`<div class="row" onclick="selectIncident(${j.incident_id})"><div class="row-head"><b>Job #${j.id}</b><span class="badge ${j.status}">${j.status}</span></div><small>${esc(j.current_step)} · ${esc(j.detail)}</small><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div></div>`).join('')||'<div class="empty">暂无任务</div>';document.querySelector('#log-count').textContent=state.logs.length;document.querySelector('#logs').innerHTML=[...state.logs].reverse().map(l=>`<div class="log"><span>${tm(l.timestamp)}</span> <span class="${esc(l.level)}">${esc(l.level)}</span> [${l.service_id}] ${esc(l.message)}</div>`).join('');const j=state.jobs.find(x=>x.incident_id===state.selectedIncident);if(j?.status==='succeeded'&&j.analysis_run_id&&!state.loadedAnalysis)loadAnalysis(state.selectedIncident);if(j&&j.status!=='succeeded')renderJob(j)}
+function render(){
+  document.querySelector('#m-services').textContent=state.services.length;
+  document.querySelector('#m-errors').textContent=state.logs.filter(x=>['ERROR','CRITICAL'].includes(x.level.toUpperCase())).length;
+  document.querySelector('#m-incidents').textContent=state.incidents.filter(x=>x.status==='open').length;
+  document.querySelector('#m-running').textContent=state.jobs.filter(x=>['pending','running'].includes(x.status)).length;
+  document.querySelector('#services').innerHTML=state.services.map(s=>`<div class="row"><div class="row-head"><b>${esc(s.name)}</b><span class="badge succeeded">接入</span></div><small>${esc(s.description||'')}</small></div>`).join('')||'<div class="empty">暂无服务</div>';
+  const incidents=[...state.incidents].reverse();
+  if(!state.selectedIncident&&incidents.length)selectIncident(incidents[0].id,false);
+  document.querySelector('#incidents').innerHTML=incidents.map(i=>`<div class="row ${state.selectedIncident===i.id?'selected':''}" onclick="selectIncident(${i.id})"><div class="row-head"><b>${esc(i.title)}</b><span class="badge ${esc(i.status)}">${esc(i.status)}</span></div><small>${tm(i.created_at)} · service ${i.service_id}</small></div>`).join('')||'<div class="empty">暂无 Incident</div>';
+  document.querySelector('#jobs').innerHTML=state.jobs.map(j=>`<div class="row" onclick="selectIncident(${j.incident_id})"><div class="row-head"><b>Job #${j.id}</b><span class="badge ${j.status}">${j.status}</span></div><small>${esc(j.current_step)} · ${esc(j.detail)}</small><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div></div>`).join('')||'<div class="empty">暂无任务</div>';
+  document.querySelector('#log-count').textContent=state.logs.length;
+  document.querySelector('#logs').innerHTML=[...state.logs].reverse().map(l=>`<div class="log"><span>${tm(l.timestamp)}</span> <span class="${esc(l.level)}">${esc(l.level)}</span> [${l.service_id}] ${esc(l.message)}</div>`).join('');
+  const j=state.jobs.find(x=>x.incident_id===state.selectedIncident);
+  if(j?.status==='succeeded'&&j.analysis_run_id&&!state.loadedAnalysis)loadAnalysis(state.selectedIncident);
+  if(j&&j.status!=='succeeded')renderJob(j);
+}
 function selectIncident(id,load=true){state.selectedIncident=id;state.loadedAnalysis=null;document.querySelector('#selected-label').textContent=`Incident #${id}`;if(load)loadAnalysis(id);render()}
 async function loadAnalysis(id){const r=await fetch(`/incidents/${id}/analysis`);if(!r.ok)return;state.loadedAnalysis=await r.json();const t=await fetch(`/incidents/${id}/trace`);state.loadedAnalysis.trace=t.ok?await t.json():[];renderAnalysis(state.loadedAnalysis)}
-function renderJob(j){document.querySelector('#diagnosis').innerHTML=`<div class="section"><b>${esc(j.current_step)}</b><p>${esc(j.detail)}</p><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div>${j.error?`<p style="color:var(--red)">${esc(j.error)}</p>`:''}</div>`}
-function renderAnalysis(a){document.querySelector('#diagnosis').innerHTML=`<h2>${esc(a.diagnosis_summary||a.summary)}</h2><p><span class="badge ${a.severity}">${esc(a.severity)}</span> ${esc(a.issue_type)}</p><div class="section"><h2>根因假设</h2>${(a.root_cause_hypotheses||[]).map(h=>`<div class="hypothesis"><b>${esc(h.cause)}</b><small>置信度 ${Math.round(h.confidence*100)}%</small><p>${(h.supporting_evidence||[]).map(esc).join('；')}</p></div>`).join('')}</div><div class="section"><h2>影响范围</h2><p>${esc(a.impact_scope)}</p></div><div class="section"><h2>建议操作</h2><ol class="actions">${(a.structured_suggested_actions||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div><div class="section"><h2>证据日志</h2>${(a.evidence_logs||[]).map(x=>`<div class="hypothesis">${esc(x.log_entry.message)}</div>`).join('')}</div><div class="section"><h2>检索依据</h2><p>Runbook ${(a.retrieved_runbook_chunks||[]).length} 条 · 相似事故 ${(a.similar_incidents||[]).length} 条</p></div><div class="section"><h2>Trace</h2><div class="trace">${(a.trace||[]).map(x=>`<div><b>${esc(x.step_name)}</b><small>${esc(x.detail)}</small></div>`).join('')}</div></div>`}
+function renderJob(j){document.querySelector('#diagnosis').innerHTML=`<div class="summary"><h2>${esc(j.current_step)}</h2><p>${esc(j.detail)}</p><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div>${j.error?`<p style="color:var(--red)">${esc(j.error)}</p>`:''}</div>`}
+function renderAnalysis(a){
+  const runbooks=(a.retrieved_runbook_chunks||[]).map(x=>`<div class="item"><b>${esc(x.source)} / ${esc(x.title)}</b><small>score=${esc(x.score)}</small><p>${esc(x.content)}</p></div>`).join('');
+  const similar=(a.similar_incidents||[]).map(x=>`<div class="item"><b>${esc(x.title)}</b><small>${esc(x.issue_type)} · score=${esc(x.similarity_score)}</small><p>${esc(x.root_cause)}</p></div>`).join('');
+  document.querySelector('#diagnosis').innerHTML=`
+    <div class="summary"><h2>${esc(a.diagnosis_summary||a.summary)}</h2><p><span class="badge ${a.severity}">${esc(a.severity)}</span> ${esc(a.issue_type)}</p></div>
+    <div class="grid2">
+      <div class="section"><h3>根因假设</h3>${(a.root_cause_hypotheses||[]).map(h=>`<div class="item"><b>${esc(h.cause)}</b><small>置信度 ${Math.round(h.confidence*100)}%</small><p>${(h.supporting_evidence||[]).map(esc).join('；')}</p></div>`).join('')}</div>
+      <div class="section"><h3>影响范围</h3><p>${esc(a.impact_scope)}</p><h3>建议操作</h3><ol class="actions">${(a.structured_suggested_actions||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>
+    </div>
+    <div class="section"><h3>证据日志</h3>${(a.evidence_logs||[]).map(x=>`<div class="item">${esc(x.log_entry.message)}</div>`).join('')||'<p class="muted">无证据日志</p>'}</div>
+    <div class="grid2">
+      <div class="section"><h3>Runbook 检索依据</h3>${runbooks||'<p class="muted">无 Runbook 结果</p>'}</div>
+      <div class="section"><h3>相似历史事故</h3>${similar||'<p class="muted">无相似事故</p>'}</div>
+    </div>
+    <div class="section"><h3>Trace</h3><div class="trace">${(a.trace||[]).map(x=>`<div><b>${esc(x.step_name)}</b><small>${esc(x.detail)}</small></div>`).join('')}</div></div>`;
+}
 </script>
-</body></html>
+</body>
+</html>

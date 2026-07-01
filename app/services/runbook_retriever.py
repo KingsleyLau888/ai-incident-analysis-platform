@@ -149,6 +149,18 @@ class RunbookRetriever:
         if self._vector_store is not None:
             return self._rank_with_vector_store(query, top_k, issue_type)
 
+        candidate_indices = _candidate_indices_for_issue_type(self.chunks, issue_type)
+        if candidate_indices:
+            candidate_documents = [documents[index] for index in candidate_indices]
+            ranked = two_stage_retrieve(
+                query=query,
+                documents=candidate_documents,
+                coarse_top_k=10,
+                fine_top_k=top_k,
+                coarse_ranker=self._coarse_ranker(),
+            )
+            return [(candidate_indices[index], score) for index, score in ranked]
+
         # Two-stage retrieval (coarse 鈫?CrossEncoder fine)
         return two_stage_retrieve(
             query=query,
@@ -251,6 +263,18 @@ def _runbook_metadata_filter(issue_type: str | None) -> dict | None:
 
 def _runbook_metadata_filter_enabled() -> bool:
     return os.getenv("RUNBOOK_METADATA_FILTER", "1").strip().lower() in {"1", "true", "yes"}
+
+
+def _candidate_indices_for_issue_type(
+    chunks: list[RunbookChunk],
+    issue_type: str | None,
+) -> list[int]:
+    if not _runbook_metadata_filter_enabled() or not issue_type or issue_type == "unknown":
+        return []
+    return [
+        index for index, chunk in enumerate(chunks)
+        if chunk.issue_type == issue_type
+    ]
 
 
 def serialize_retrieved_chunks(chunks: list[RetrievedRunbookChunk]) -> list[dict]:

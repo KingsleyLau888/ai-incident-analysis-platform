@@ -26,9 +26,10 @@ from app.services.llm_judge import JudgeVerdict, get_judge
 
 
 EVAL_DIR = PROJECT_ROOT / "eval"
+REPORTS_DIR = EVAL_DIR / "reports"
 DEFAULT_CASES_PATH = EVAL_DIR / "eval_cases.json"
-DEFAULT_REPORT_PATH = EVAL_DIR / "eval_report.md"
-DEFAULT_BENCHMARK_REPORT_PATH = EVAL_DIR / "retrieval_benchmark_report.md"
+DEFAULT_REPORT_PATH = REPORTS_DIR / "eval_report.md"
+DEFAULT_BENCHMARK_REPORT_PATH = REPORTS_DIR / "retrieval_benchmark_report.md"
 
 
 @dataclass(frozen=True)
@@ -513,7 +514,7 @@ def main() -> None:
             pass
         reports = {
             mode: run_eval(
-                report_path=EVAL_DIR / f"eval_report_{mode}.md",
+                report_path=REPORTS_DIR / f"eval_report_{mode}.md",
                 retrieval_mode=mode,
                 enable_judge=args.judge,
             )

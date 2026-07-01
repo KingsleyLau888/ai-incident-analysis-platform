@@ -128,11 +128,14 @@ def analyze_incident(
     )
     _report(progress_callback, "log_filtering", f"Selected {len(logs)} recent service logs.")
 
-    detection = detect_issue(logs)  # rule engine这里是检测issue的类型
+    detection = detect_issue(logs)
     _report(
         progress_callback,
         "rule_detection",
-        f"Detected {detection.issue_type} with severity {detection.severity}.",
+        (
+            f"Detected {detection.issue_type} with severity {detection.severity}; "
+            f"confidence={detection.confidence:.2f}."
+        ),
     )
     service_name = incident.service.name if incident.service else f"service-{incident.service_id}"
 
@@ -425,7 +428,8 @@ def _run_react_agent(
     def detect_signals_fn(ctx):
         d = detect_issue(ctx.get("logs", logs))
         return {"issue_type": d.issue_type, "severity": d.severity,
-                "matched_issues": d.matched_issues, "evidence_logs": d.evidence_logs}
+                "matched_issues": d.matched_issues, "evidence_logs": d.evidence_logs,
+                "confidence": d.confidence, "candidate_scores": d.candidate_scores or {}}
     def retrieve_runbooks_fn(query, top_k):
         return runbook_retriever.retrieve(
             incident_title=incident.title, service_name=service_name,
@@ -511,7 +515,8 @@ def _persist_react_trace(
          f"selected_mode=agent; reason={mode_decision.reason}."),
         ("react_agent_context", 1,
          f"Agent mode: {react_result.provider}; total_steps={len(react_result.steps)}; "
-         f"logs_count={len(logs)}; issue_type={detection.issue_type}"),
+         f"logs_count={len(logs)}; issue_type={detection.issue_type}; "
+         f"confidence={detection.confidence:.2f}"),
     ]
     for step in react_result.steps:
         detail = " | ".join(filter(None, [
@@ -543,8 +548,16 @@ def _persist_pipeline_trace(
 
     trace_details = {
         "log_filtering": f"Selected {len(logs)} logs for service.",
-        "rule_detection": f"Detected issue_type={detection.issue_type}; matched={detection.matched_issues or ['unknown']}.",
-        "evidence_selection": f"Selected {len(detection.evidence_logs)} evidence logs.",
+        "rule_detection": (
+            f"Detected issue_type={detection.issue_type}; "
+            f"confidence={detection.confidence:.2f}; "
+            f"matched={detection.matched_issues or ['unknown']}; "
+            f"scores={detection.candidate_scores or {}}; "
+            f"signals={detection.matched_signals or []}."
+        ),
+        "evidence_selection": (
+            f"Selected {len(detection.evidence_logs)} direct and related evidence logs."
+        ),
         "analysis_mode_routing": f"selected_mode={mode_decision.mode}; reason={mode_decision.reason}.",
         "query_rewriting": f"Query rewriting: provider={features['query_rewriting_provider']}, variants={','.join(features.get('_rewritten_variants', ['(original)']))}.",
         "planner_decision": f"Planner selected tool_steps={diagnosis_plan.tool_steps}.",

@@ -51,7 +51,17 @@ def test_demo_shop_complex_mixed_fault_returns_500(monkeypatch, tmp_path):
     assert response.json()["detail"] == "mixed checkout failure"
 
 
-def test_demo_shop_frontend_loads(monkeypatch, tmp_path):
+def test_demo_shop_fault_endpoint_returns_operator_label(monkeypatch, tmp_path):
+    client = TestClient(_shop_app(monkeypatch, tmp_path))
+
+    response = client.post("/api/faults/simple_database")
+
+    assert response.status_code == 200
+    assert response.json()["fault_mode"] == "simple_database"
+    assert response.json()["fault_label"] == "数据库降级"
+
+
+def test_demo_shop_frontend_loads_realistic_roles(monkeypatch, tmp_path):
     client = TestClient(_shop_app(monkeypatch, tmp_path))
 
     response = client.get("/")
@@ -59,5 +69,6 @@ def test_demo_shop_frontend_loads(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert "Demo Shop" in response.text
     assert "Checkout" in response.text
-    assert "简单故障" in response.text
-    assert "复杂故障" in response.text
+    assert "用户视角" in response.text
+    assert "运行状态控制台" in response.text
+    assert "普通用户不会看到这里" in response.text

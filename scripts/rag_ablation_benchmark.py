@@ -23,7 +23,7 @@ from app.services.rrf import reciprocal_rank_fusion
 from app.services.runbook_retriever import RunbookRetriever, build_runbook_query
 
 
-REPORT_PATH = PROJECT_ROOT / "eval" / "rag_ablation_report.md"
+REPORT_PATH = PROJECT_ROOT / "eval" / "reports" / "rag_ablation_report.md"
 
 
 class _Log:

@@ -48,6 +48,16 @@ PRODUCTS = [
     {"sku": "usb-c-dock", "name": "USB-C Dock", "price": 89, "stock": 12},
 ]
 
+FAULT_LABELS = {
+    "none": "正常运行",
+    "simple_database": "数据库降级",
+    "simple_timeout": "支付超时",
+    "simple_auth": "认证异常",
+    "complex_database": "复杂数据库故障",
+    "complex_timeout": "复杂支付超时",
+    "complex_mixed": "认证 + 超时混合故障",
+}
+
 
 @app.on_event("startup")
 def startup() -> None:
@@ -106,7 +116,12 @@ def shop_frontend() -> str:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "fault_mode": fault_mode, "service_name": SERVICE_NAME}
+    return {
+        "status": "ok",
+        "fault_mode": fault_mode,
+        "fault_label": FAULT_LABELS[fault_mode],
+        "service_name": SERVICE_NAME,
+    }
 
 
 @app.get("/api/products")
@@ -124,20 +139,11 @@ def list_products() -> list[dict]:
 @app.post("/api/faults/{mode}")
 def set_fault(mode: str) -> dict[str, str]:
     global fault_mode
-    allowed = {
-        "none",
-        "simple_database",
-        "simple_timeout",
-        "simple_auth",
-        "complex_database",
-        "complex_timeout",
-        "complex_mixed",
-    }
-    if mode not in allowed:
-        raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(allowed)}")
+    if mode not in FAULT_LABELS:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(FAULT_LABELS)}")
     fault_mode = mode
-    logger.info(f"Fault mode changed to {mode}")
-    return {"fault_mode": fault_mode}
+    logger.info(f"Runtime condition changed to {FAULT_LABELS[mode]} ({mode})")
+    return {"fault_mode": fault_mode, "fault_label": FAULT_LABELS[mode]}
 
 
 @app.post("/api/checkout")
@@ -221,46 +227,87 @@ SHOP_HTML = """
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Demo Shop</title>
 <style>
-body{margin:0;font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#f5f7fb;color:#17202a}
-header{padding:22px 32px;background:#fff;border-bottom:1px solid #dce1e6;display:flex;justify-content:space-between;align-items:center}
-h1{margin:0;font-size:24px}.sub{color:#66717d;margin-top:4px}.layout{display:grid;grid-template-columns:1fr 380px;gap:18px;padding:24px 32px}
-.panel{background:#fff;border:1px solid #dce1e6;border-radius:8px;padding:18px}.products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.product{border:1px solid #e2e7ed;border-radius:8px;padding:14px}.product h3{margin:0 0 8px}.price{font-size:22px;font-weight:700}.muted{color:#66717d}.hint{font-size:12px;color:#66717d;margin:4px 0 10px}
-button{border:0;border-radius:5px;background:#1769aa;color:#fff;padding:9px 12px;cursor:pointer;font-weight:600}button.secondary{background:#eef2f6;color:#17202a}.simple button{background:#26834a}.complex button{background:#a96800}
-.faults{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}.status{padding:12px;border-radius:6px;background:#eef5fb;margin-top:12px;min-height:52px}.ok{background:#e7f5ec}.err{background:#fbe9e9;color:#a52a2a}
-.log{font-family:Consolas,monospace;font-size:12px;background:#101418;color:#d8dee4;border-radius:6px;padding:12px;height:180px;overflow:auto}
-@media(max-width:900px){.layout{grid-template-columns:1fr}.products{grid-template-columns:1fr}}
+:root{--bg:#f5f7fb;--panel:#fff;--ink:#17202a;--muted:#66717d;--line:#dce1e6;--blue:#1769aa;--green:#26834a;--red:#c43d3d;--amber:#a96800}
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Microsoft YaHei,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;letter-spacing:0}
+header{padding:18px 28px;background:#fff;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:18px}
+h1{margin:0;font-size:24px}h2{font-size:18px;margin:0 0 12px}h3{font-size:14px;margin:18px 0 8px}.sub{color:var(--muted);margin-top:4px}
+a{color:var(--blue);text-decoration:none}.layout{display:grid;grid-template-columns:1fr 360px;gap:18px;padding:22px 28px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:18px}
+.products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.product{border:1px solid #e2e7ed;border-radius:8px;padding:14px;display:grid;gap:8px}.product h3{font-size:17px;margin:0}.price{font-size:22px;font-weight:700}
+.muted{color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:#eef2f6;color:#384453;padding:4px 9px;font-size:12px}.pill.ok{background:#e7f5ec;color:var(--green)}.pill.bad{background:#fbe9e9;color:var(--red)}
+button{border:0;border-radius:6px;background:var(--blue);color:#fff;padding:9px 12px;cursor:pointer;font-weight:700}button.secondary{background:#eef2f6;color:#17202a}.faults{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.faults button{background:#304a68}.faults.simple button{background:#3f7d56}.faults.complex button{background:#9b6416}
+.status{padding:13px;border-radius:7px;background:#eef5fb;margin-top:12px;min-height:58px}.status.ok{background:#e7f5ec}.status.err{background:#fbe9e9;color:var(--red)}.status strong{display:block;margin-bottom:4px}
+.activity{font-family:Consolas,monospace;font-size:12px;background:#101418;color:#d8dee4;border-radius:6px;padding:12px;height:190px;overflow:auto}.activity div{padding:4px 0;border-bottom:1px solid #252b31}
+.note{font-size:12px;color:var(--muted);line-height:1.55;margin:6px 0 12px}.role{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}.role div{border:1px solid var(--line);border-radius:7px;padding:12px;background:#fafbfc}
+@media(max-width:1000px){.layout{grid-template-columns:1fr}.products{grid-template-columns:1fr}.role{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<header><div><h1>Demo Shop</h1><div class="sub">用户在这里下单；工程师在 AI Incident Copilot 里看故障诊断。</div></div><a href="http://127.0.0.1:8010" target="_blank">打开 Incident 平台</a></header>
+<header>
+  <div>
+    <h1>Demo Shop</h1>
+    <div class="sub">普通用户只负责下单；后台状态异常时，AI Incident Copilot 自动接收日志并诊断。</div>
+  </div>
+  <div>
+    <span id="runtime-pill" class="pill ok">正常运行</span>
+    <a href="http://127.0.0.1:8010" target="_blank">打开 Incident 平台</a>
+  </div>
+</header>
 <main class="layout">
-<section class="panel"><h2>商品</h2><div id="products" class="products"></div></section>
-<aside class="panel">
-<h2>故障注入</h2>
-<div class="faults"><button class="secondary" onclick="setFault('none')">正常</button></div>
-<h3>简单故障</h3>
-<p class="hint">单一信号，预期走稳定 pipeline。</p>
-<div class="faults simple">
-<button onclick="setFault('simple_database')">简单数据库</button>
-<button onclick="setFault('simple_timeout')">简单超时</button>
-<button onclick="setFault('simple_auth')">简单认证</button>
-</div>
-<h3>复杂故障</h3>
-<p class="hint">混合信号，预期自动升级 Agent。</p>
-<div class="faults complex">
-<button onclick="setFault('complex_database')">复杂数据库</button>
-<button onclick="setFault('complex_timeout')">复杂超时</button>
-<button onclick="setFault('complex_mixed')">混合故障</button>
-</div>
-<div id="status" class="status">准备就绪</div><h2>操作记录</h2><div id="log" class="log"></div></aside>
+  <section class="panel">
+    <div class="role">
+      <div><b>用户视角</b><p class="note">用户只看到商品和 checkout，不知道系统内部是否有数据库、认证或支付依赖异常。</p></div>
+      <div><b>工程师视角</b><p class="note">错误日志会被发送到 Incident Copilot，平台自动创建 Incident、分析证据并展示 Trace。</p></div>
+    </div>
+    <h2>商品</h2>
+    <div id="products" class="products"></div>
+  </section>
+  <aside class="panel">
+    <h2>运行状态控制台</h2>
+    <p class="note">这是演示用的后台控制台，用来模拟真实系统里的依赖异常；普通用户不会看到这里。</p>
+    <div class="faults"><button class="secondary" onclick="setFault('none')">恢复正常</button></div>
+    <h3>单一故障</h3>
+    <div class="faults simple">
+      <button onclick="setFault('simple_database')">数据库降级</button>
+      <button onclick="setFault('simple_timeout')">支付超时</button>
+      <button onclick="setFault('simple_auth')">认证异常</button>
+    </div>
+    <h3>复杂故障</h3>
+    <div class="faults complex">
+      <button onclick="setFault('complex_database')">数据库连接中断</button>
+      <button onclick="setFault('complex_timeout')">支付链路超时</button>
+      <button onclick="setFault('complex_mixed')">认证 + 超时混合</button>
+    </div>
+    <div id="status" class="status"><strong>准备就绪</strong><span>请选择商品并 checkout。</span></div>
+    <h2 style="margin-top:18px">用户操作记录</h2>
+    <div id="log" class="activity"></div>
+  </aside>
 </main>
 <script>
 let selectedSku='';
+const labels={
+  none:'正常运行',simple_database:'数据库降级',simple_timeout:'支付超时',simple_auth:'认证异常',
+  complex_database:'复杂数据库故障',complex_timeout:'复杂支付超时',complex_mixed:'认证 + 超时混合故障'
+};
 const log=t=>{const box=document.querySelector('#log');box.innerHTML=`<div>${new Date().toLocaleTimeString()} ${t}</div>`+box.innerHTML};
-async function loadProducts(){const r=await fetch('/api/products');const products=await r.json();if(!selectedSku&&products[0])selectedSku=products[0].sku;document.querySelector('#products').innerHTML=products.map(p=>`<div class="product"><h3>${p.name}</h3><div class="muted">SKU ${p.sku}</div><div class="price">$${p.price}</div><p class="muted">库存 ${p.stock}</p><button onclick="checkout('${p.sku}')">Checkout</button></div>`).join('')}
-async function setFault(mode){const r=await fetch('/api/faults/'+mode,{method:'POST'});const v=await r.json();document.querySelector('#status').className='status';document.querySelector('#status').textContent='当前模式：'+v.fault_mode;log('fault_mode='+v.fault_mode)}
-async function checkout(sku){const status=document.querySelector('#status');status.className='status';status.textContent='正在 Checkout...';log('checkout '+sku);const r=await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku,quantity:1})});const v=await r.json();if(r.ok){status.className='status ok';status.textContent='支付成功：'+v.request_id;log('paid '+v.request_id);loadProducts()}else{status.className='status err';status.textContent='支付失败：'+v.detail;log('failed '+v.detail)}}
+function setStatus(kind,title,body){const el=document.querySelector('#status');el.className='status '+kind;el.innerHTML=`<strong>${title}</strong><span>${body}</span>`}
+async function loadProducts(){
+  const r=await fetch('/api/products');const products=await r.json();
+  if(!selectedSku&&products[0])selectedSku=products[0].sku;
+  document.querySelector('#products').innerHTML=products.map(p=>`<div class="product"><h3>${p.name}</h3><div class="muted">SKU ${p.sku}</div><div class="price">$${p.price}</div><p class="muted">库存 ${p.stock}</p><button onclick="checkout('${p.sku}')">Checkout</button></div>`).join('');
+}
+async function setFault(mode){
+  const r=await fetch('/api/faults/'+mode,{method:'POST'});const v=await r.json();
+  const pill=document.querySelector('#runtime-pill');pill.textContent=v.fault_label;pill.className='pill '+(mode==='none'?'ok':'bad');
+  setStatus('', '运行状态已切换', v.fault_label);
+  log('runtime='+v.fault_label);
+}
+async function checkout(sku){
+  setStatus('', '正在 Checkout...', sku);log('checkout '+sku);
+  const r=await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku,quantity:1})});
+  const v=await r.json();
+  if(r.ok){setStatus('ok','支付成功',v.request_id);log('paid '+v.request_id);loadProducts()}
+  else{setStatus('err','支付失败',v.detail);log('failed '+v.detail)}
+}
 loadProducts();
 </script>
 </body>

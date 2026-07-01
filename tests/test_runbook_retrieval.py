@@ -152,6 +152,22 @@ def test_chromadb_rank_can_use_issue_type_metadata_filter(monkeypatch):
     assert vector_store.wheres == [{"issue_type": "database_issue"}]
 
 
+def test_tfidf_rank_uses_issue_type_metadata_filter(monkeypatch):
+    monkeypatch.setenv("RUNBOOK_METADATA_FILTER", "1")
+    chunks = load_runbook_chunks()
+    retriever = RunbookRetriever(chunks=chunks, retrieval_mode="tfidf")
+
+    ranked = retriever._rank(
+        "token secret config database timeout",
+        [f"{chunk.source}\n{chunk.title}\n{chunk.content}" for chunk in chunks],
+        top_k=5,
+        issue_type="database_issue",
+    )
+
+    assert ranked
+    assert all(chunks[index].issue_type == "database_issue" for index, _ in ranked)
+
+
 def test_analyze_returns_retrieved_runbook_chunks(client: TestClient):
     incident = _create_incident_with_logs(
         client,
@@ -168,7 +184,16 @@ def test_analyze_returns_retrieved_runbook_chunks(client: TestClient):
     analysis = response.json()
     assert "retrieved_runbook_chunks" in analysis
     assert analysis["retrieved_runbook_chunks"]
-    assert any(chunk["source"] == "database_issue.md" for chunk in analysis["retrieved_runbook_chunks"])
+    database_sources = {
+        "database_issue.md",
+        "mysql_connection_pool.md",
+        "postgres_primary_unavailable.md",
+        "firewall_policy_block.md",
+    }
+    assert any(
+        chunk["source"] in database_sources
+        for chunk in analysis["retrieved_runbook_chunks"]
+    )
 
 
 def test_unknown_issue_analyze_returns_no_runbook_chunks(client: TestClient):
