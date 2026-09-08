@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -30,7 +31,7 @@ from app.services import (
 router = APIRouter()
 
 # Dashboard templates
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=Path(__file__).resolve().parents[2] / "templates")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

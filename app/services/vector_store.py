@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -34,7 +33,8 @@ class EmbeddingFunction(Protocol):
 # Default persistence directory
 # ---------------------------------------------------------------------------
 
-DEFAULT_PERSIST_DIR = Path(tempfile.gettempdir()) / "ai_incident_chroma"
+# Repo-relative default; env CHROMA_PERSIST_DIR still wins (see get_chroma_persist_dir).
+DEFAULT_PERSIST_DIR = Path(__file__).resolve().parents[2] / "runtime" / "vector_store" / "chroma"
 
 
 def get_chroma_persist_dir() -> Path:

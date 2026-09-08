@@ -183,7 +183,7 @@ pytest 测试，覆盖 API、analysis、RAG retrieval、LLM fallback、eval harn
 ```text
 .venv/
 runtime/
-.chroma_db/
+tmp/
 *.db
 *.db-journal
 *.log
@@ -197,7 +197,7 @@ __pycache__/
 runtime/data/
 ```
 
-ChromaDB 默认使用系统临时目录，也可以通过 `CHROMA_PERSIST_DIR` 指定。
+ChromaDB 默认存储在项目内 `runtime/vector_store/chroma`，也可以通过 `CHROMA_PERSIST_DIR` 指定。
 
 ## 推荐阅读顺序
 

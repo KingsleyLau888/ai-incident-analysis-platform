@@ -6,14 +6,10 @@ $root = (Resolve-Path "$PSScriptRoot\..").Path
 
 $files = @(
     "*.log",
-    "*-journal",
-    "auto_demo.db",
-    "sqlite_probe.db",
-    "sqlite_probe.db-journal"
+    "*-journal"
 )
 
 $directories = @(
-    ".demo_runtime",
     ".pytest_cache"
 )
 
@@ -54,9 +50,7 @@ foreach ($name in $directories) {
 
 Write-Host ""
 Write-Host "Not deleted by this script:"
-Write-Host "- incident-live.db"
-Write-Host "- app.db"
-Write-Host "- demo_shop.db"
 Write-Host "- runtime/data/*.db"
-Write-Host "- .chroma_db"
+Write-Host "- runtime/vector_store/chroma"
+Write-Host "- tmp/"
 Write-Host "Delete those only when you intentionally want to reset local demo data."
