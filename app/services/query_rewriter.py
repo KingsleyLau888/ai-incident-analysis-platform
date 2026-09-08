@@ -96,6 +96,21 @@ def _llm_rewrite(
 # ---------------------------------------------------------------------------
 
 
+# 证据关键词提取时跳过的高频泛词（不区分故障类型，浪费变体槽位）
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "then", "else", "for", "with",
+    "from", "to", "of", "in", "on", "at", "by", "as", "is", "are", "was",
+    "were", "be", "been", "being", "this", "that", "these", "those", "it",
+    "its", "not", "no", "has", "have", "had", "will", "would", "can", "could",
+    "should", "may", "might", "do", "does", "did", "get", "got", "error",
+    "failed", "failure", "fail", "unable", "cannot", "trying", "attempt",
+    "attempts", "attempting", "while", "after", "during", "request", "requests",
+    "response", "responses", "retry", "retries", "check", "service", "services",
+    "using", "use", "used", "due", "caused", "cause", "occurred", "message",
+    "log", "logs", "level", "status",
+}
+
+
 def _template_rewrite(
     incident_title: str,
     service_name: str,
@@ -104,35 +119,42 @@ def _template_rewrite(
 ) -> list[str]:
     """Generate query variants using templates based on issue type."""
     issue_label = issue_type.replace("_", " ")
+    evidence_excerpt = " ".join(dict.fromkeys(evidence_text.split()))[:200]
     variants = [
-        # Symptom perspective
-        f"{incident_title} {service_name} error symptoms",
+        # Symptom perspective：标题 + 服务 + 证据摘录
+        f"{incident_title} {service_name} error symptoms {evidence_excerpt}",
     ]
     if evidence_text:
-        keywords = _extract_keywords(evidence_text, 5)
-        variants.append(f"{service_name} {' '.join(keywords)} {issue_label}")
+        keywords = _extract_keywords(evidence_text, 8)
+        if keywords:
+            variants.append(f"{service_name} {' '.join(keywords)} {issue_label}")
     if issue_type != "unknown":
-        variants.append(f"{issue_type.replace('_', ' ')} troubleshooting {service_name}")
+        variants.append(f"{issue_label} troubleshooting {service_name}")
     # Ensure we have at least 2 variants
     if len(variants) < 2:
         variants.append(f"{incident_title} {service_name}")
     return variants
 
 
-def _extract_keywords(text: str, max_words: int = 5) -> list[str]:
-    """Extract salient words from evidence text."""
+def _extract_keywords(text: str, max_words: int = 8) -> list[str]:
+    """Extract salient words from evidence text.
+
+    旧实现只匹配大写开头/下划线词，全小写的证据词（provider、refused、
+    unavailable 等）被整体丢弃。改为按非字母数字切分、过滤停用词、去重取前 N 个。
+    """
     import re
 
-    # Simple: grab the first few capitalized/technical-looking words
-    words = re.findall(r"[A-Z][a-z]+(?:[A-Z][a-z]+)*|[a-z]+(?:_[a-z]+)+", text)
+    words = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_./-]*", text)
     seen = set()
     result = []
-    for w in words:
-        if w.lower() not in seen:
-            seen.add(w.lower())
-            result.append(w)
-            if len(result) >= max_words:
-                break
+    for word in words:
+        lowered = word.lower()
+        if len(lowered) < 3 or lowered in _STOPWORDS or lowered in seen:
+            continue
+        seen.add(lowered)
+        result.append(lowered)
+        if len(result) >= max_words:
+            break
     return result
 
 

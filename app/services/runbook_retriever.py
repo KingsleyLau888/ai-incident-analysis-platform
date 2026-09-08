@@ -149,6 +149,10 @@ class RunbookRetriever:
         if self._vector_store is not None:
             return self._rank_with_vector_store(query, top_k, issue_type)
 
+        filter_mode = _runbook_filter_mode()
+        if filter_mode == "soft":
+            return self._rank_soft(query, documents, top_k, issue_type)
+
         candidate_indices = _candidate_indices_for_issue_type(self.chunks, issue_type)
         if candidate_indices:
             candidate_documents = [documents[index] for index in candidate_indices]
@@ -170,6 +174,37 @@ class RunbookRetriever:
             coarse_ranker=self._coarse_ranker(),
         )
 
+    def _rank_soft(
+        self,
+        query: str,
+        documents: list[str],
+        top_k: int,
+        issue_type: str | None = None,
+    ) -> list[tuple[int, float]]:
+        """soft 过滤模式：全量粗排后对类型不匹配 chunk 降权，再精排取 top_k。
+
+        粗排候选数放大，保证跨类型文档有机会进入降权前的候选集；
+        降权后按分数重排，CrossEncoder 精排沿用 two_stage 语义。
+        """
+        penalty = _runbook_filter_soft_penalty()
+        coarse_top_k = max(10, top_k * 5)
+        coarse = self._coarse_ranker().rank(query, documents, top_k=coarse_top_k)
+        penalized = [
+            (
+                index,
+                score * penalty if self.chunks[index].issue_type != issue_type else score,
+            )
+            for index, score in coarse
+        ]
+        penalized.sort(key=lambda pair: pair[1], reverse=True)
+
+        reranker = get_cross_encoder()
+        if reranker is None or len(penalized) <= top_k:
+            return penalized[:top_k]
+        candidate_documents = [documents[index] for index, _ in penalized]
+        fine = reranker.rerank(query, candidate_documents, top_k=top_k)
+        return [(penalized[candidate_index][0], score) for candidate_index, score in fine]
+
     def _rank_with_vector_store(
         self,
         query: str,
@@ -179,7 +214,10 @@ class RunbookRetriever:
         if self._vector_store is None:
             return []
 
+        filter_mode = _runbook_filter_mode()
         candidate_k = max(top_k, int(os.getenv("VECTOR_RETRIEVAL_CANDIDATES", "10")))
+        if filter_mode == "soft":
+            candidate_k = max(candidate_k, top_k * 5)
         where = _runbook_metadata_filter(issue_type)
         results = self._vector_store.query_runbooks(query, top_k=candidate_k, where=where)
         if not results and where is not None:
@@ -194,6 +232,17 @@ class RunbookRetriever:
             for result in results
             if result.get("chunk_id") in chunk_index
         ]
+
+        if filter_mode == "soft":
+            penalty = _runbook_filter_soft_penalty()
+            ranked = [
+                (
+                    index,
+                    score * penalty if self.chunks[index].issue_type != issue_type else score,
+                )
+                for index, score in ranked
+            ]
+            ranked.sort(key=lambda pair: pair[1], reverse=True)
 
         reranker = get_cross_encoder()
         if reranker is None or len(ranked) <= top_k:
@@ -242,13 +291,19 @@ def build_runbook_query(
     evidence_logs: list[LogEntry],
     issue_type: str,
 ) -> str:
-    evidence_text = " ".join(log.message for log in evidence_logs)
+    # 去重：错误风暴会产生同文案日志，重复消息会虚增查询词权重
+    evidence_text = " ".join(dict.fromkeys(log.message for log in evidence_logs))
+    max_chars = int(os.getenv("RUNBOOK_QUERY_EVIDENCE_MAX_CHARS", "500"))
+    if len(evidence_text) > max_chars:
+        evidence_text = evidence_text[:max_chars]
+    # 人类可读类型词：database_issue → database issue，与语料中的 "database" 能对上
+    issue_label = issue_type.replace("_", " ")
     return " ".join(
         part
         for part in [
             incident_title,
             service_name,
-            issue_type,
+            issue_label,
             evidence_text,
         ]
         if part
@@ -256,7 +311,7 @@ def build_runbook_query(
 
 
 def _runbook_metadata_filter(issue_type: str | None) -> dict | None:
-    if not _runbook_metadata_filter_enabled() or not issue_type or issue_type == "unknown":
+    if _runbook_filter_mode() != "hard" or not issue_type or issue_type == "unknown":
         return None
     return {"issue_type": issue_type}
 
@@ -265,11 +320,31 @@ def _runbook_metadata_filter_enabled() -> bool:
     return os.getenv("RUNBOOK_METADATA_FILTER", "1").strip().lower() in {"1", "true", "yes"}
 
 
+def _runbook_filter_mode() -> str:
+    """过滤模式：hard（默认，现状）| soft（降权不排除）| off（不过滤）。
+
+    RUNBOOK_METADATA_FILTER=0 时强制 off；RUNBOOK_FILTER_MODE 非法取值回退 hard。
+    """
+    if not _runbook_metadata_filter_enabled():
+        return "off"
+    mode = os.getenv("RUNBOOK_FILTER_MODE", "hard").strip().lower()
+    return mode if mode in {"hard", "soft", "off"} else "hard"
+
+
+def _runbook_filter_soft_penalty() -> float:
+    """soft 模式下类型不匹配 chunk 的打分降权系数。"""
+    try:
+        penalty = float(os.getenv("RUNBOOK_FILTER_SOFT_PENALTY", "0.5"))
+    except ValueError:
+        return 0.5
+    return penalty if 0.0 <= penalty <= 1.0 else 0.5
+
+
 def _candidate_indices_for_issue_type(
     chunks: list[RunbookChunk],
     issue_type: str | None,
 ) -> list[int]:
-    if not _runbook_metadata_filter_enabled() or not issue_type or issue_type == "unknown":
+    if _runbook_filter_mode() != "hard" or not issue_type or issue_type == "unknown":
         return []
     return [
         index for index, chunk in enumerate(chunks)

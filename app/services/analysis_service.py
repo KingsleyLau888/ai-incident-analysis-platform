@@ -331,6 +331,30 @@ def _report(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _pipeline_variant_top_k() -> int:
+    """多查询融合前每个变体的检索条数（RRF 融合输入宽度）。
+
+    默认 5（历史行为），可用 PIPELINE_VARIANT_TOP_K 调大以扩大具体手册的召回。
+    """
+    try:
+        value = int(os.getenv("PIPELINE_VARIANT_TOP_K", "5"))
+    except ValueError:
+        return 5
+    return value if value >= 1 else 5
+
+
+def _pipeline_rrf_k() -> int:
+    """RRF 融合常数 k（默认 60，历史行为）。
+
+    调大压缩名次差异、奖励多列表共识，可用 RRF_K 实验。
+    """
+    try:
+        value = int(os.getenv("RRF_K", "60"))
+    except ValueError:
+        return 60
+    return value if value >= 1 else 60
+
+
 def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
     incident,
     service_name,
@@ -342,7 +366,8 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
     features,
 ):
     """Pipeline with Query Rewriting → multi-query retrieval → RRF fusion."""
-    evidence_text = " ".join(log.message for log in detection.evidence_logs)
+    # 去重：错误风暴产生同文案日志，重复消息会虚增查询词权重
+    evidence_text = " ".join(dict.fromkeys(log.message for log in detection.evidence_logs))
 
     # --- Query Rewriting ---
     rewritten = rewrite_query(
@@ -356,18 +381,20 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
     if "retrieve_runbooks" in diagnosis_plan.tool_steps:
         if len(rewritten.variants) > 1:
             # Multi-query: retrieve independently for each variant, fuse with RRF
+            variant_top_k = _pipeline_variant_top_k()
             all_ranked: list[list[tuple[int, float]]] = []
             for variant in rewritten.variants:
                 ranked = runbook_retriever._rank(
                     variant,
                     [f"{c.source}\n{c.title}\n{c.content}" for c in runbook_retriever.chunks],
-                    top_k=5,
+                    top_k=variant_top_k,
                     issue_type=detection.issue_type,
                 )
                 all_ranked.append(ranked)
             fused = reciprocal_rank_fusion(
                 all_ranked,
                 key=lambda item: item[0],
+                k=_pipeline_rrf_k(),
             )
             top_indices = [
                 (result.item[0], result.score) for result in fused[:3]
@@ -398,9 +425,9 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
             all_ranked: list[list[tuple[int, float]]] = []
             inc_docs = [_incident_doc(inc) for inc in similar_incident_retriever.incidents]
             for variant in rewritten.variants:
-                ranked = similar_incident_retriever._rank(variant, inc_docs, top_k=5)
+                ranked = similar_incident_retriever._rank(variant, inc_docs, top_k=_pipeline_variant_top_k())
                 all_ranked.append(ranked)
-            fused = reciprocal_rank_fusion(all_ranked, key=lambda item: item[0])
+            fused = reciprocal_rank_fusion(all_ranked, key=lambda item: item[0], k=_pipeline_rrf_k())
             top_indices = [(result.item[0], result.score) for result in fused[:3]]
             similar_incidents = [
                 SimilarIncident(
