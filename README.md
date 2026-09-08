@@ -1,5 +1,7 @@
 # AI Incident Copilot Platform
 
+> **开发或运行前先读：[项目基线与改进指南](docs/PROJECT_BASELINE.md)。** 其中记录已实现能力、审查问题、修复顺序、运行检查和交接状态。编码助手入口见 [AGENTS.md](AGENTS.md)。
+
 面向 AIOps 场景的智能故障诊断后端原型。项目模拟一个业务系统持续产生日志，AI Incident Copilot 接收日志、自动创建 Incident、执行分析流程，并输出可解释的诊断结果。
 
 当前项目不是完整生产级 AIOps 平台，也不是 fully autonomous Agent。它更准确的定位是：一个可运行、可评测、可展示的 Incident Analysis Pipeline，包含规则检测、证据日志、Runbook RAG、相似历史事故检索、可插拔 LLM 结构化诊断、Trace 和 Eval Harness。
@@ -214,6 +216,8 @@ runtime/              本地运行数据库和临时产物，不提交 Git
 - 当前 Dashboard 用于演示后端流程，不是完整运维产品前端。
 
 ## 后续规划
+
+以下为历史方向列表，其中时间窗口、去重、重排等已有基础实现。当前待办和验收以 [项目基线](docs/PROJECT_BASELINE.md) 为准，不应直接视为尚未实现的新功能。
 
 - 接入更真实的日志源，例如 OpenTelemetry、Fluent Bit、Prometheus Alertmanager。
 - 增加时间窗口、去重、告警聚合和 incident lifecycle。

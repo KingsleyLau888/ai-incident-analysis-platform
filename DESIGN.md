@@ -2,6 +2,8 @@
 
 ## Agentic RAG for Incident Diagnosis
 
+> 状态说明（2026-09-08）：本文保留愿景与早期设计背景，部分 current / future work 描述早于现有实现。异步任务、向量检索、重排和反馈接口已经存在。当前能力、问题与开发顺序见 [项目基线与改进指南](docs/PROJECT_BASELINE.md)，不要依据历史规划重复建设。
+
 ## 1. Project Vision
 
 AI Incident Copilot Platform is a backend system for incident diagnosis.

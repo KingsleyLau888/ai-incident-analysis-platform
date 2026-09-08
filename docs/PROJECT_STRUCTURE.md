@@ -1,5 +1,7 @@
 ﻿# Project Structure
 
+开始开发、测试或演示前，先阅读 [项目基线与改进指南](PROJECT_BASELINE.md)；编码助手工作约定见 [AGENTS.md](../AGENTS.md)。
+
 这个文件用于解释项目目录，帮助快速区分：核心源码、Demo 系统、知识库、评测、文档和本地运行产物。
 
 ## 根目录
@@ -199,7 +201,7 @@ ChromaDB 默认使用系统临时目录，也可以通过 `CHROMA_PERSIST_DIR` �
 
 ## 推荐阅读顺序
 
-如果是为了理解项目，建议按这个顺序看：
+如果是为了理解项目，建议按这个顺序看：先读根目录 `AGENTS.md` 和 `docs/PROJECT_BASELINE.md`，再按下面顺序深入源码。
 
 ```text
 README.md
