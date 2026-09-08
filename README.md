@@ -149,6 +149,21 @@ $env:RETRIEVAL_MODE="chromadb"
 
 默认建议本地开发使用 `tfidf`，稳定、无需模型下载。启用 `sentence-transformers` 或 `chromadb` 时，如果模型不可用，系统会 fallback 到可运行的检索方式。
 
+可选检索实验配置（默认值均为消融实验验证过的最佳组合，详见 `eval/reports/optimization_report_2026-09.md`）：
+
+```powershell
+# 类型过滤策略：hard（默认，仅同类型候选）| soft（跨类型降权）| off（不过滤）
+$env:RUNBOOK_FILTER_MODE="hard"
+# soft 模式下类型不匹配 chunk 的降权系数
+$env:RUNBOOK_FILTER_SOFT_PENALTY="0.25"
+# 多查询融合前每个变体的检索条数（默认 5，实测 8 为负收益）
+$env:PIPELINE_VARIANT_TOP_K="5"
+# RRF 融合常数 k（默认 60，实测 20/150 无差异）
+$env:RRF_K="60"
+# 单查询模式下证据文本最大长度（字符）
+$env:RUNBOOK_QUERY_EVIDENCE_MAX_CHARS="500"
+```
+
 ## LLM Provider
 
 默认使用 Mock LLM，保证本地测试不依赖真实 API。
