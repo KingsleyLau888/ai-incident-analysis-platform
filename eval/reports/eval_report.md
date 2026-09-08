@@ -735,4 +735,3 @@ Total cases: 27
 - expected: issue_type=timeout_issue, severity=medium, runbooks=['dns_resolution_failure.md', 'third_party_api_degradation.md', 'payment_provider_timeout.md'], similar_types=['timeout_issue']
 - actual: issue_type=timeout_issue, severity=medium, runbooks=['token_signing_key_rotation.md', 'timeout_issue.md', 'timeout_issue.md'], similar_types=['timeout_issue', 'timeout_issue', 'timeout_issue']
 - possible_failure_reason: Expected evidence keywords were not present in the selected evidence logs. The expected runbook source was missing from the retrieved top results.
-

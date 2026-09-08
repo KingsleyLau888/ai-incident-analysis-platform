@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.timezone import BeijingTimeMixin
+
 
 class LogEntryBase(BaseModel):
     service_id: int
@@ -21,7 +23,7 @@ class ExternalLogCreate(BaseModel):
     timestamp: datetime | None = None
 
 
-class LogEntryRead(BaseModel):
+class LogEntryRead(BeijingTimeMixin, BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

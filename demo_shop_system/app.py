@@ -288,7 +288,8 @@ const labels={
   none:'正常运行',simple_database:'数据库降级',simple_timeout:'支付超时',simple_auth:'认证异常',
   complex_database:'复杂数据库故障',complex_timeout:'复杂支付超时',complex_mixed:'认证 + 超时混合故障'
 };
-const log=t=>{const box=document.querySelector('#log');box.innerHTML=`<div>${new Date().toLocaleTimeString()} ${t}</div>`+box.innerHTML};
+const bjTime=()=>new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+const log=t=>{const box=document.querySelector('#log');box.innerHTML=`<div>${bjTime()} ${t}</div>`+box.innerHTML};
 function setStatus(kind,title,body){const el=document.querySelector('#status');el.className='status '+kind;el.innerHTML=`<strong>${title}</strong><span>${body}</span>`}
 async function loadProducts(){
   const r=await fetch('/api/products');const products=await r.json();

@@ -54,7 +54,7 @@ main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template
 <script>
 const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,loadedAnalysis:null};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const tm=v=>v?new Date(v).toLocaleTimeString('zh-CN',{hour12:false}):'';
+const tm=v=>v?new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
 const source=new EventSource('/events');
 source.addEventListener('snapshot',e=>{Object.assign(state,JSON.parse(e.data));document.querySelector('#live-dot').classList.add('live');document.querySelector('#live-text').textContent='实时连接';render()});
 source.onerror=()=>{document.querySelector('#live-dot').classList.remove('live');document.querySelector('#live-text').textContent='正在重连'};

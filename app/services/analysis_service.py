@@ -100,6 +100,43 @@ def _has_real_llm() -> bool:
     )
 
 
+def _log_window_start(
+    db: Session,
+    incident: Incident,
+    incident_time,
+    log_window_minutes: int,
+):
+    default_start = incident_time - timedelta(minutes=log_window_minutes)
+    if not _is_automatic_incident(incident):
+        return default_start
+
+    previous_incident = db.scalars(
+        select(Incident)
+        .where(
+            Incident.service_id == incident.service_id,
+            Incident.id < incident.id,
+        )
+        .order_by(Incident.id.desc())
+    ).first()
+    if previous_incident is None:
+        return default_start
+
+    previous_time = previous_incident.created_at
+    if previous_time.tzinfo is None:
+        previous_time = previous_time.replace(tzinfo=UTC)
+    return max(default_start, previous_time)
+
+
+def _log_window_end(incident: Incident, incident_time):
+    if not _is_automatic_incident(incident):
+        return None
+    return incident_time
+
+
+def _is_automatic_incident(incident: Incident) -> bool:
+    return incident.title.startswith("Automatic alert for ")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main entry point
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -115,14 +152,18 @@ def analyze_incident(
     incident_time = incident.created_at
     if incident_time.tzinfo is None:
         incident_time = incident_time.replace(tzinfo=UTC)
-    window_start = incident_time - timedelta(minutes=log_window_minutes)
+    window_start = _log_window_start(db, incident, incident_time, log_window_minutes)
+    window_end = _log_window_end(incident, incident_time)
+    log_filters = [
+        LogEntry.service_id == incident.service_id,
+        LogEntry.timestamp >= window_start,
+    ]
+    if window_end is not None:
+        log_filters.append(LogEntry.timestamp <= window_end)
     logs = list(
         db.scalars(
             select(LogEntry)
-            .where(
-                LogEntry.service_id == incident.service_id,
-                LogEntry.timestamp >= window_start,
-            )
+            .where(*log_filters)
             .order_by(LogEntry.timestamp, LogEntry.id)
         ).all()
     )

@@ -28,7 +28,13 @@ class MockLLMClient:
         hypotheses = [
             RootCauseHypothesis(
                 cause=f"{service_name} may be affected by {issue_label}.",
-                confidence=0.65 if issue_type != "unknown" else 0.2,
+                confidence=_primary_confidence(
+                    issue_type=issue_type,
+                    severity=severity,
+                    evidence_logs=evidence_logs,
+                    retrieved_runbook_chunks=retrieved_runbook_chunks,
+                    similar_incidents=similar_incidents,
+                ),
                 supporting_evidence=[evidence_hint],
             )
         ]
@@ -37,7 +43,11 @@ class MockLLMClient:
             hypotheses.append(
                 RootCauseHypothesis(
                     cause=closest.root_cause,
-                    confidence=0.75,
+                    confidence=_similar_incident_confidence(
+                        closest.similarity_score,
+                        evidence_logs=evidence_logs,
+                        retrieved_runbook_chunks=retrieved_runbook_chunks,
+                    ),
                     supporting_evidence=[f"Similar incident: {closest.title}"],
                 )
             )
@@ -82,3 +92,48 @@ def _actions_from_similar_incidents(similar_incidents: list[SimilarIncident]) ->
     if not similar_incidents:
         return []
     return [f"Consider the prior resolution: {similar_incidents[0].resolution}"]
+
+
+def _primary_confidence(
+    *,
+    issue_type: str,
+    severity: str,
+    evidence_logs: list[LogEntry],
+    retrieved_runbook_chunks: list[RetrievedRunbookChunk],
+    similar_incidents: list[SimilarIncident],
+) -> float:
+    if issue_type == "unknown":
+        return 0.2
+
+    score = 0.45
+    score += min(len(evidence_logs), 4) * 0.05
+    score += _max_runbook_score(retrieved_runbook_chunks) * 0.15
+    score += _max_similar_incident_score(similar_incidents) * 0.15
+    if severity == "high":
+        score += 0.05
+    return _bounded_confidence(score)
+
+
+def _similar_incident_confidence(
+    similarity_score: float,
+    *,
+    evidence_logs: list[LogEntry],
+    retrieved_runbook_chunks: list[RetrievedRunbookChunk],
+) -> float:
+    score = 0.4
+    score += similarity_score * 0.35
+    score += min(len(evidence_logs), 4) * 0.03
+    score += _max_runbook_score(retrieved_runbook_chunks) * 0.08
+    return _bounded_confidence(score)
+
+
+def _max_runbook_score(chunks: list[RetrievedRunbookChunk]) -> float:
+    return max((chunk.score for chunk in chunks), default=0.0)
+
+
+def _max_similar_incident_score(similar_incidents: list[SimilarIncident]) -> float:
+    return max((incident.similarity_score for incident in similar_incidents), default=0.0)
+
+
+def _bounded_confidence(score: float) -> float:
+    return round(max(0.05, min(score, 0.95)), 2)

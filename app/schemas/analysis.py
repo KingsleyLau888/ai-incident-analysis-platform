@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.log_entry import LogEntryRead
+from app.schemas.timezone import BeijingTimeMixin
 
 
 class EvidenceLogRead(BaseModel):
@@ -14,7 +15,7 @@ class EvidenceLogRead(BaseModel):
     log_entry: LogEntryRead
 
 
-class AnalysisTraceRead(BaseModel):
+class AnalysisTraceRead(BeijingTimeMixin, BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -53,7 +54,7 @@ class RootCauseHypothesisRead(BaseModel):
     supporting_evidence: list[str]
 
 
-class AnalysisRunRead(BaseModel):
+class AnalysisRunRead(BeijingTimeMixin, BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

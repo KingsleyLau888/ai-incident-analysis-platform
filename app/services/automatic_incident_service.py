@@ -13,6 +13,7 @@ from app.services.incident_detector import (
     automatic_incidents_enabled,
     evaluate_error_burst,
     find_recent_open_incident,
+    infer_issue_type_for_burst,
 )
 
 
@@ -21,11 +22,14 @@ def process_log_entry(db: Session, log_entry: LogEntry) -> tuple[Incident | None
     if not automatic_incidents_enabled():
         return None, None
 
-    decision = evaluate_error_burst(db, log_entry)
+    latest_open = find_recent_open_incident(db, log_entry.service_id)
+    burst_start = latest_open.created_at if latest_open is not None else None
+    decision = evaluate_error_burst(db, log_entry, since=burst_start)
     if not decision.should_create:
         return None, None
 
-    existing = find_recent_open_incident(db, log_entry.service_id)
+    issue_type = infer_issue_type_for_burst(db, log_entry, since=burst_start)
+    existing = find_recent_open_incident(db, log_entry.service_id, issue_type=issue_type)
     if existing is not None:
         return existing, None
 
@@ -35,7 +39,7 @@ def process_log_entry(db: Session, log_entry: LogEntry) -> tuple[Incident | None
         IncidentCreate(
             service_id=log_entry.service_id,
             title=f"Automatic alert for {service_name}",
-            description=decision.reason,
+            description=f"{decision.reason} Inferred issue_type={issue_type}.",
             status="open",
         ),
     )

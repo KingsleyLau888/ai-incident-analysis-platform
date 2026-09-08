@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.timezone import BeijingTimeMixin
+
 
 class ServiceBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
@@ -13,7 +15,7 @@ class ServiceCreate(ServiceBase):
     pass
 
 
-class ServiceRead(ServiceBase):
+class ServiceRead(BeijingTimeMixin, ServiceBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
