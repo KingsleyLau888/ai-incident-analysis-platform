@@ -263,21 +263,32 @@ def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in sentences if s.strip()]
 
 
+# 类别关键词表：顺序即平票时的优先顺序（与旧版顺序优先一致）
+_ISSUE_TYPE_TERMS: list[tuple[str, tuple[str, ...]]] = [
+    ("database_issue", ("database", "mysql", "postgres", "connection_pool", "dbconnection")),
+    ("timeout_issue", ("timeout", "deadline", "dns", "queue", "kafka", "provider")),
+    ("auth_issue", ("auth", "oauth", "token", "credential", "secret", "permission")),
+    ("cache_issue", ("cache", "redis", "stampede")),
+    ("memory_issue", ("memory", "oom", "heap")),
+    ("server_error", ("server_error", "500", "rollback", "serialization", "release")),
+]
+
+
 def infer_issue_type(source: str, title: str = "", content: str = "") -> str:
+    """按类别关键词命中次数计分推断故障类型。
+
+    旧实现按固定顺序优先（database→timeout→auth→…），某个 chunk 只要出现一个
+    高优先级词（如 "provider"）就会被整块改标。改为统计 source/title/content
+    中各类别关键词出现次数，取最高分；平票按类别表顺序。这样 "Auth failures
+    after identity provider key rotation" 会因 auth/token 命中数更多而正确归为
+    auth_issue，而不是被单个 "provider" 抢成 timeout_issue。
+    """
     text = f"{source} {title} {content}".lower()
-    if any(term in text for term in ["database", "mysql", "postgres", "connection_pool", "dbconnection"]):
-        return "database_issue"
-    if any(term in text for term in ["timeout", "deadline", "dns", "queue", "kafka", "provider"]):
-        return "timeout_issue"
-    if any(term in text for term in ["auth", "oauth", "token", "credential", "secret", "permission"]):
-        return "auth_issue"
-    if any(term in text for term in ["cache", "redis", "stampede"]):
-        return "cache_issue"
-    if any(term in text for term in ["memory", "oom", "heap"]):
-        return "memory_issue"
-    if any(term in text for term in ["server_error", "500", "rollback", "serialization", "release"]):
-        return "server_error"
-    return "unknown"
+    category, best_score = max(
+        ((category, sum(text.count(term) for term in terms)) for category, terms in _ISSUE_TYPE_TERMS),
+        key=lambda pair: pair[1],
+    )
+    return category if best_score > 0 else "unknown"
 
 
 def infer_chunk_type(title: str) -> str:
