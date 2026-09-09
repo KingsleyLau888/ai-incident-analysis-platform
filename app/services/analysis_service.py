@@ -277,7 +277,8 @@ def analyze_incident(
     )
     db.add(analysis_run)
     db.flush()
-    _report(progress_callback, "persistence", "Persisting evidence, diagnosis, and trace.")
+    # 注意：此处不发进度消息。结果、证据、Trace 必须一次提交（原子性），
+    # 进度回调内部会 commit，若在此处发消息会提前提交半成品 AnalysisRun（F01）。
 
     for log in detection.evidence_logs:
         db.add(
@@ -301,6 +302,9 @@ def analyze_incident(
         )
 
     db.commit()
+    # 提交完成后才汇报进度：此时结果、证据、Trace 已整体落盘，
+    # 进度回调内部的 commit 只会提交 job 行，不会泄漏半成品（F01）。
+    _report(progress_callback, "persistence", "Evidence, diagnosis, and trace persisted.")
     saved_analysis_run = get_analysis_run(db, analysis_run.id)
     if saved_analysis_run is not None:
         saved_analysis_run.set_retrieved_runbook_chunks(serialize_retrieved_chunks(retrieved_runbook_chunks))

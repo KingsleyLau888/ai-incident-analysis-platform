@@ -10,9 +10,9 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后修复评测 Judge 静默失效（F07）：序列化修复 + 失败显式统计，27/27 出分（85 passed） |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）与 F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试，88 passed） |
 | 当前阶段 | 主链路功能已存在，进入正确性与可信度收敛阶段 |
-| 建议下一项 | F01：分析结果与进度更新的事务边界；先补故障注入回归，再小范围修复 |
+| 建议下一项 | 按用户节奏：F15（反馈存在性校验）或 F13（Dashboard 竞态）小步推进；F02/F03/F04 待用户消化后开工 |
 | 随后处理 | F02/F03：任务幂等、待分析事故去重与恢复；F04：日志时间语义 |
 | 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
 | 暂缓 | 新 Agent 框架、更多检索后端、多 Agent 协作、自动修复、大规模前端重写 |
@@ -115,13 +115,12 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 
 “已复现”表示执行了探针或评测；“代码确认”表示控制流直接可见；“待实测”表示尚未做运行验证。**所有条目初始状态：待修复。** 行号属于审查快照，后续请按函数复核。
 
-### F01 · P0：进度提交破坏分析结果的原子性
+### F01 · P0：进度提交破坏分析结果的原子性 — **已修复（2026-09-09）**
 
-- 证据：`app/services/analysis_service.py:279` flush AnalysisRun 后发送 persistence 进度；`app/services/analysis_job_service.py:71` 在同一 Session commit。
-- 后果：证据/Trace 写入失败时 rollback 无法撤回已被进度回调提交的结果，“最新分析”可能拿到半成品。**已复现，置信度高。**
-- 修改：进度更新不得隐式提交业务结果；调整最后一次进度时机或明确事务归属，确保结果、证据、Trace 原子提交。SQLite 下不要简单另开写事务造成锁冲突。
-- 验收：证据和 Trace 写入处注入失败，无可见半成品；任务失败可追踪；成功结果关系完整。
-- 工作量中（跨 service 和事务测试）；收益高（所有后台分析经过此路径）。
+- 证据（历史）：`app/services/analysis_service.py:279` 曾在 flush AnalysisRun 后发送 persistence 进度；`analysis_job_service._set_progress` 在同一 Session commit，把半成品 AnalysisRun 提前提交。
+- 修改（已实施）：persistence 进度从提交前移到 `db.commit()` 之后，文案改过去式；分析全程的进度回调只发生在只读阶段，结果、证据、Trace 一次性原子提交。SQLite 下不另开写事务（进度更新仍走同一 Session，仅提交 job 行）。
+- 验收：新增 3 项故障注入测试（第二连接观察中间状态 + Trace 写入注入失败 + run_job 端到端），并做反向验证：旧代码下 3 项全失败、新代码下全通过。全套 88 passed。
+- 备注：若提交后的进度回调自身抛异常，任务会标 failed 但完整结果已落盘（可追踪，非半成品）；属 F02 任务/结果关系范畴。
 
 ### F02 · P0：任务不幂等，缺少可靠恢复
 
@@ -375,6 +374,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-08 | 文件结构中等整理（用户批准）：git 卫生、移除空壳 app/tracing、Chroma 默认目录项目化、模板绝对路径、清理脚本去过期项；分三笔主题提交 f373abf/d19f660/结构整理 | 62 passed 与基线一致；get_chroma_persist_dir 默认与覆盖实测通过；仓库外目录启动 smoke test 三端点均 200；清理脚本 dry run 正常 | F01-F18 状态不变；F08 仅默认目录落地，数量新鲜度与先删后建仍按 C 阶段；下一步按第 7 节 A 阶段 |
 | 2026-09-09 | Runbook 检索重优化（用户批准计划，全配置消融主战场）：4 个杠杆实施 + 逐轮数据裁决；保留 hard 过滤与默认融合参数；RUNBOOK_FILTER_MODE/PIPELINE_VARIANT_TOP_K/RRF_K 保留为环境配置项（默认值=历史行为）；旧 95.45% 复现失败正式作废 | 71 passed（+9 标注回归）；27 例 Top-1 88.89%/Recall 84.57%/P@3 74.07%；22 例消融 tfidf 单查询 Top-1 100%、5 配置 effective_mode 全部与请求后端一致；4 后端对比 hybrid 92.59% | F11 验收：Top-1 ≥75% 达标、Recall ≥85% 差 0.43；剩余 5 例检索失败已逐一归因（2 跨类型结构性 + 3 稀疏词面限制）；F12 有效后端验证部分完成；F01/F02/F03/F04/F07 不变，下一步 F01 |
 | 2026-09-09 | 修复评测 Judge 静默失效（F07，用户按"小步消化"节奏批准）：`_run_judge` 去掉对 list[dict] 的 `model_dump()` 调用、失败不再返回 None；报告按案例写 judge_status/judge_error，汇总写 requested/attempted/succeeded/failed/skipped 与 provider；新增 `_desensitize_error`（URL/长 token 脱敏）；`passed` 判定语义保持不变 | 新增 tests/test_eval_judge.py 4 项，全套 85 passed；27 例开 Judge 实测 succeeded=27/27（修复前 27/27 静默失败），证据 runtime/audit/eval-f07-judge-20260909-132424.md | F07 标记已验证完成；下一步按用户节奏 F01（分析结果事务原子性） |
+| 2026-09-09 | 修复分析结果原子性（F01，用户批准）：persistence 进度消息从 flush 后移到 `db.commit()` 之后（文案改过去式），进度回调在分析全程只于只读阶段触发；结果、证据、Trace 一次提交 | 新增 tests/test_analysis_transaction.py 3 项（第二连接中间状态观察、Trace 注入失败回滚、run_job 端到端失败）；反向验证旧代码下 3 项全失败；全套 88 passed | F01 标记已验证完成；下一步按用户节奏 F15 或 F13 |
 
 每次工作更新此模板，不另建竞争性总计划：
 
