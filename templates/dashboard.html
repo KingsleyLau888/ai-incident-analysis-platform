@@ -32,7 +32,7 @@ main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template
 <main>
   <section class="metrics">
     <div class="metric"><strong id="m-services">0</strong><span>服务</span></div>
-    <div class="metric"><strong id="m-errors">0</strong><span>最近错误日志</span></div>
+    <div class="metric"><strong id="m-errors">0</strong><span>最近错误日志（50 条内）</span></div>
     <div class="metric"><strong id="m-incidents">0</strong><span>开放事故</span></div>
     <div class="metric"><strong id="m-running">0</strong><span>分析任务</span></div>
   </section>
@@ -52,7 +52,8 @@ main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template
   </section>
 </main>
 <script>
-const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,loadedAnalysis:null};
+const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,loadedAnalysis:null,loadedAnalysisFor:null,analysisLoading:false};
+let analysisSeq=0; // 请求编号：响应对不上号即过期，丢弃（F13）
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const tm=v=>v?new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
 const source=new EventSource('/events');
@@ -72,13 +73,39 @@ function render(){
   document.querySelector('#log-count').textContent=state.logs.length;
   document.querySelector('#logs').innerHTML=[...state.logs].reverse().map(l=>`<div class="log"><span>${tm(l.timestamp)}</span> <span class="${esc(l.level)}">${esc(l.level)}</span> [${l.service_id}] ${esc(l.message)}</div>`).join('');
   const j=state.jobs.find(x=>x.incident_id===state.selectedIncident);
-  if(j?.status==='succeeded'&&j.analysis_run_id&&!state.loadedAnalysis)loadAnalysis(state.selectedIncident);
+  // 以 run id 为准：新分析完成（run id 变化）才重新加载，旧结果不赖着（F13）
+  if(j?.status==='succeeded'&&j.analysis_run_id&&!state.analysisLoading&&state.loadedAnalysisFor?.runId!==j.analysis_run_id)loadAnalysis(state.selectedIncident);
   if(j&&j.status!=='succeeded')renderJob(j);
+  else if(state.selectedIncident&&!state.analysisLoading&&state.loadedAnalysisFor?.incidentId!==state.selectedIncident)renderAnalysis(null);
 }
-function selectIncident(id,load=true){state.selectedIncident=id;state.loadedAnalysis=null;document.querySelector('#selected-label').textContent=`Incident #${id}`;if(load)loadAnalysis(id);render()}
-async function loadAnalysis(id){const r=await fetch(`/incidents/${id}/analysis`);if(!r.ok)return;state.loadedAnalysis=await r.json();const t=await fetch(`/incidents/${id}/trace`);state.loadedAnalysis.trace=t.ok?await t.json():[];renderAnalysis(state.loadedAnalysis)}
+function selectIncident(id,load=true){analysisSeq++;state.selectedIncident=id;state.loadedAnalysis=null;state.loadedAnalysisFor=null;state.analysisLoading=false;document.querySelector('#selected-label').textContent=`Incident #${id}`;document.querySelector('#diagnosis').innerHTML='<div class="empty">加载中…</div>';if(load)loadAnalysis(id);render()}
+async function loadAnalysis(id){
+  const seq=++analysisSeq;state.analysisLoading=true;
+  try{
+    const r=await fetch(`/incidents/${id}/analysis`);
+    if(seq!==analysisSeq)return; // 期间已切走：过期响应，丢弃（F13）
+    if(!r.ok){
+      state.loadedAnalysis=null;
+      const job=state.jobs.find(x=>x.incident_id===id);
+      // 记录"已尝试加载"：无分析时也带上 job 的 run id，防止每个快照重复请求（F13）
+      state.loadedAnalysisFor={incidentId:id,runId:job?.analysis_run_id??null};
+      state.analysisLoading=false;
+      if(state.selectedIncident===id)renderAnalysis(null);
+      return;
+    }
+    const data=await r.json();
+    if(seq!==analysisSeq)return;
+    state.loadedAnalysis=data;state.loadedAnalysisFor={incidentId:id,runId:data.id};
+    const t=await fetch(`/incidents/${id}/trace`);
+    if(seq!==analysisSeq)return;
+    state.loadedAnalysis.trace=t.ok?await t.json():[];
+  }catch(err){state.loadedAnalysis=null;state.loadedAnalysisFor=null;if(seq!==analysisSeq)return;renderAnalysis(null);}
+  state.analysisLoading=false;
+  if(state.selectedIncident===id)renderAnalysis(state.loadedAnalysis);
+}
 function renderJob(j){document.querySelector('#diagnosis').innerHTML=`<div class="summary"><h2>${esc(j.current_step)}</h2><p>${esc(j.detail)}</p><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div>${j.error?`<p style="color:var(--red)">${esc(j.error)}</p>`:''}</div>`}
 function renderAnalysis(a){
+  if(!a){document.querySelector('#diagnosis').innerHTML='<div class="empty">该 Incident 暂无分析结果。</div>';return;}
   const runbooks=(a.retrieved_runbook_chunks||[]).map(x=>`<div class="item"><b>${esc(x.source)} / ${esc(x.title)}</b><small>score=${esc(x.score)}</small><p>${esc(x.content)}</p></div>`).join('');
   const similar=(a.similar_incidents||[]).map(x=>`<div class="item"><b>${esc(x.title)}</b><small>${esc(x.issue_type)} · score=${esc(x.similarity_score)}</small><p>${esc(x.root_cause)}</p></div>`).join('');
   document.querySelector('#diagnosis').innerHTML=`
