@@ -10,11 +10,11 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%；新增 9 项标注回归测试（71 passed） |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后修复评测 Judge 静默失效（F07）：序列化修复 + 失败显式统计，27/27 出分（85 passed） |
 | 当前阶段 | 主链路功能已存在，进入正确性与可信度收敛阶段 |
 | 建议下一项 | F01：分析结果与进度更新的事务边界；先补故障注入回归，再小范围修复 |
 | 随后处理 | F02/F03：任务幂等、待分析事故去重与恢复；F04：日志时间语义 |
-| 评测前置项 | F07：修复 Judge 字典序列化与失败统计，再讨论真实模型质量 |
+| 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
 | 暂缓 | 新 Agent 框架、更多检索后端、多 Agent 协作、自动修复、大规模前端重写 |
 | 运行基线 | Mock + TF-IDF + pipeline，关闭 CrossEncoder，单进程、本地隔离数据 |
 | 未验证 | 真实模型 API、多进程重启恢复、浏览器交互、压力测试（dense/Chroma 已实测：见 optimization_report_2026-09） |
@@ -163,13 +163,12 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：query 变化真正改变检索输入；调查证据可回溯 log ID；统计说明不冒充原始日志。
 - 工作量中（Agent、检索接口）；收益高（调查路径与结果一致）。未发现跨会话记忆自动写回，不称其为“长期记忆被模型自言自语污染”。
 
-### F07 · P0（评估）：Judge 调用前失败，被静默忽略
+### F07 · P0（评估）：Judge 调用前失败，被静默忽略 — **已修复（2026-09-09）**
 
-- 证据：`eval/run_eval.py:102` 调用 `h.model_dump()`，而 `app/models/analysis.py` 返回 `list[dict]`；`:107` 捕获异常后返回 None。
-- 后果：正常非空根因下 Judge 根本不执行，开关启用不代表获得评审。**注入 Judge 已复现。**
-- 修改：统一序列化契约；报告 requested、attempted、succeeded、failed、skipped 和脱敏错误；未评审不能当通过。
-- 验收：非空/空根因、HTTP 失败、无效响应均能统计；Mock 与真实 Judge 明确区分。
-- 工作量低到中（eval、测试）；收益高（避免无效指标驱动决策）。
+- 证据（历史）：`eval/run_eval.py:102` 曾调用 `h.model_dump()`，而 `app/models/analysis.py` 的 `root_cause_hypotheses` 返回 `list[dict]`；`except Exception: return None` 把异常静默吞掉。注入 Judge 复现：非空根因下 Judge 从不执行。
+- 修改（已实施）：去掉多余序列化直接传 `list[dict]`；失败返回 `{"status": "failed", "error": <脱敏>}` 不再返回 None；报告按案例写 `judge_status`/`judge_error`，汇总区写 requested/attempted/succeeded/failed/skipped 与 provider 分布（mock/llm）；judge 关闭时报告不输出 judge 行。`passed` 判定语义不变（Judge 分数为质量参考，不参与过关，避免与检索指标混淆）。
+- 验收：27 例开 Judge 实测 succeeded=27/27、failed=0（修复前 27/27 静默失败），报告含 LLM Judge Summary；新增 4 项回归测试（成功路径、失败显式化+脱敏、关闭时无输出），全套 85 passed。证据：`runtime/audit/eval-f07-judge-20260909-132424.md`。
+- 备注：MockJudge 启发式分数（coherence 100%、grounding 73.7%、actionability 18.77%）只作机制验证，不代表真实模型质量；真实 Judge 评测属 F10/F12 范畴。
 
 ### F08 · P1：索引按数量判断新鲜度，重建先删旧数据
 
@@ -375,6 +374,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-08 | 建立基线，保留主链路，暂缓新增框架；仅修改文档入口 | 62 测试通过，27 案例 11 失败，8 类隔离探针确认缺口 | 优先 F01；用户可调整顺序 |
 | 2026-09-08 | 文件结构中等整理（用户批准）：git 卫生、移除空壳 app/tracing、Chroma 默认目录项目化、模板绝对路径、清理脚本去过期项；分三笔主题提交 f373abf/d19f660/结构整理 | 62 passed 与基线一致；get_chroma_persist_dir 默认与覆盖实测通过；仓库外目录启动 smoke test 三端点均 200；清理脚本 dry run 正常 | F01-F18 状态不变；F08 仅默认目录落地，数量新鲜度与先删后建仍按 C 阶段；下一步按第 7 节 A 阶段 |
 | 2026-09-09 | Runbook 检索重优化（用户批准计划，全配置消融主战场）：4 个杠杆实施 + 逐轮数据裁决；保留 hard 过滤与默认融合参数；RUNBOOK_FILTER_MODE/PIPELINE_VARIANT_TOP_K/RRF_K 保留为环境配置项（默认值=历史行为）；旧 95.45% 复现失败正式作废 | 71 passed（+9 标注回归）；27 例 Top-1 88.89%/Recall 84.57%/P@3 74.07%；22 例消融 tfidf 单查询 Top-1 100%、5 配置 effective_mode 全部与请求后端一致；4 后端对比 hybrid 92.59% | F11 验收：Top-1 ≥75% 达标、Recall ≥85% 差 0.43；剩余 5 例检索失败已逐一归因（2 跨类型结构性 + 3 稀疏词面限制）；F12 有效后端验证部分完成；F01/F02/F03/F04/F07 不变，下一步 F01 |
+| 2026-09-09 | 修复评测 Judge 静默失效（F07，用户按"小步消化"节奏批准）：`_run_judge` 去掉对 list[dict] 的 `model_dump()` 调用、失败不再返回 None；报告按案例写 judge_status/judge_error，汇总写 requested/attempted/succeeded/failed/skipped 与 provider；新增 `_desensitize_error`（URL/长 token 脱敏）；`passed` 判定语义保持不变 | 新增 tests/test_eval_judge.py 4 项，全套 85 passed；27 例开 Judge 实测 succeeded=27/27（修复前 27/27 静默失败），证据 runtime/audit/eval-f07-judge-20260909-132424.md | F07 标记已验证完成；下一步按用户节奏 F01（分析结果事务原子性） |
 
 每次工作更新此模板，不另建竞争性总计划：
 

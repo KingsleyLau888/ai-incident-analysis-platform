@@ -68,10 +68,10 @@ def run_eval(
                 started = time.perf_counter()
                 analysis = _run_case(db, case)
                 latency_ms = (time.perf_counter() - started) * 1000
-                judge_verdict = None
+                judge_outcome = {"status": "skipped", "verdict": None, "error": None}
                 if judge is not None:
-                    judge_verdict = _run_judge(case, analysis, judge)
-                case_results.append(_score_case(case, analysis, latency_ms, judge_verdict))
+                    judge_outcome = _run_judge(case, analysis, judge)
+                case_results.append(_score_case(case, analysis, latency_ms, judge_outcome))
 
         metrics = _aggregate_metrics(case_results)
         report = {
@@ -87,25 +87,38 @@ def run_eval(
         return report
 
 
-def _run_judge(case: EvalCase, analysis, judge) -> JudgeVerdict | None:
-    """Run LLM-as-Judge evaluation on the analysis result."""
+def _run_judge(case: EvalCase, analysis, judge) -> dict:
+    """Run LLM-as-Judge evaluation on the analysis result.
+
+    Returns {"status": "succeeded", "verdict": JudgeVerdict, "error": None} on
+    success, or {"status": "failed", "verdict": None, "error": <desensitized>}
+    on failure. Failures must never be silently swallowed (F07).
+    """
     try:
         evidence_messages = [evidence.log_entry.message for evidence in analysis.evidence_logs]
-        return judge.evaluate(
+        verdict = judge.evaluate(
             incident_title=case.incident_title,
             service_name=case.service_name,
             issue_type=analysis.issue_type,
             severity=analysis.severity,
             evidence_messages=evidence_messages,
             diagnosis_summary=analysis.diagnosis_summary,
-            root_cause_hypotheses=[
-                h.model_dump() for h in analysis.root_cause_hypotheses
-            ] if hasattr(analysis, 'root_cause_hypotheses') and analysis.root_cause_hypotheses else [],
+            # root_cause_hypotheses 是 JSON 列的 list[dict]，直接传给 judge
+            root_cause_hypotheses=list(analysis.root_cause_hypotheses),
             suggested_actions=analysis.structured_suggested_actions or [analysis.suggested_actions],
             impact_scope=analysis.impact_scope,
         )
-    except Exception:
-        return None
+        return {"status": "succeeded", "verdict": verdict, "error": None}
+    except Exception as exc:
+        return {"status": "failed", "verdict": None, "error": _desensitize_error(exc)}
+
+
+def _desensitize_error(exc: Exception, max_length: int = 200) -> str:
+    """Turn an exception into a report-safe string: no URLs, no long tokens."""
+    text = f"{type(exc).__name__}: {exc}"
+    text = re.sub(r"https?://\S+", "<url>", text)
+    text = re.sub(r"[A-Za-z0-9_\-]{20,}", "<redacted>", text)
+    return text[:max_length]
 
 
 def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
@@ -156,17 +169,21 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
                 f"- latency_ms: {result['latency_ms']:.2f}",
             ]
         )
-        # LLM Judge scores
-        if result.get("judge_verdict"):
-            v = result["judge_verdict"]
-            lines.extend([
-                f"- judge_provider: {v.get('provider', 'n/a')}",
-                f"- diagnosis_coherence: {v.get('diagnosis_coherence', 0):.2f}",
-                f"- evidence_grounding: {v.get('evidence_grounding', 0):.2f}",
-                f"- hallucination_flag: {v.get('hallucination_flag', False)}",
-                f"- actionability: {v.get('actionability', 0):.2f}",
-                f"- judge_critique: {v.get('critique', '')}",
-            ])
+        # LLM Judge results — explicit status so failures are never silent
+        if report.get("judge_enabled"):
+            lines.append(f"- judge_status: {result.get('judge_status', 'unknown')}")
+            if result.get("judge_error"):
+                lines.append(f"- judge_error: {result['judge_error']}")
+            if result.get("judge_verdict"):
+                v = result["judge_verdict"]
+                lines.extend([
+                    f"- judge_provider: {v.get('provider', 'n/a')}",
+                    f"- diagnosis_coherence: {v.get('diagnosis_coherence', 0):.2f}",
+                    f"- evidence_grounding: {v.get('evidence_grounding', 0):.2f}",
+                    f"- hallucination_flag: {v.get('hallucination_flag', False)}",
+                    f"- actionability: {v.get('actionability', 0):.2f}",
+                    f"- judge_critique: {v.get('critique', '')}",
+                ])
         lines.extend([
             f"- passed: {result['passed']}",
             f"- failure_categories: {', '.join(result['failure_categories']) or 'none'}",
@@ -199,20 +216,35 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
     else:
         lines.append("- No failed cases.")
 
-    # Add LLM Judge summary section
-    if report.get("judge_enabled") and report.get("metrics", {}).get("judge_diagnosis_coherence") is not None:
+    # Add LLM Judge summary section — always present when enabled, even if
+    # every evaluation failed, so "enabled but never reviewed" stays visible.
+    if report.get("judge_enabled"):
+        metrics = report.get("metrics", {})
         lines.extend([
             "",
             "## LLM Judge Summary",
             "",
-            "Judge evaluation across all cases:",
-            "",
-            f"- avg diagnosis_coherence: {report['metrics'].get('judge_diagnosis_coherence', 0):.2%}",
-            f"- avg evidence_grounding: {report['metrics'].get('judge_evidence_grounding', 0):.2%}",
-            f"- hallucination_rate: {report['metrics'].get('judge_hallucination_rate', 0):.2%}",
-            f"- avg actionability: {report['metrics'].get('judge_actionability', 0):.2%}",
+            f"- requested: {metrics.get('judge_requested', 0)}",
+            f"- attempted: {metrics.get('judge_attempted', 0)}",
+            f"- succeeded: {metrics.get('judge_succeeded', 0)}",
+            f"- failed: {metrics.get('judge_failed', 0)}",
+            f"- skipped: {metrics.get('judge_skipped', 0)}",
+            f"- provider: mock {metrics.get('judge_provider_mock', 0)} / llm {metrics.get('judge_provider_llm', 0)}",
             "",
         ])
+        if metrics.get("judge_succeeded"):
+            lines.extend([
+                f"- avg diagnosis_coherence: {metrics.get('judge_diagnosis_coherence', 0):.2%}",
+                f"- avg evidence_grounding: {metrics.get('judge_evidence_grounding', 0):.2%}",
+                f"- hallucination_rate: {metrics.get('judge_hallucination_rate', 0):.2%}",
+                f"- avg actionability: {metrics.get('judge_actionability', 0):.2%}",
+                "",
+            ])
+        else:
+            lines.extend([
+                "- judge averages: n/a (no successful evaluations)",
+                "",
+            ])
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -287,7 +319,7 @@ def _score_case(
     case: EvalCase,
     analysis,
     latency_ms: float,
-    judge_verdict: JudgeVerdict | None = None,
+    judge_outcome: dict | None = None,
 ) -> dict:
     actual_evidence_messages = [evidence.log_entry.message for evidence in analysis.evidence_logs]
     actual_runbook_sources = [chunk["source"] for chunk in analysis.retrieved_runbook_chunks]
@@ -351,7 +383,12 @@ def _score_case(
         "possible_failure_reason": _possible_failure_reason(failure_categories),
     }
 
-    if judge_verdict is not None:
+    judge_outcome = judge_outcome or {"status": "skipped", "verdict": None, "error": None}
+    result["judge_status"] = judge_outcome["status"]
+    if judge_outcome.get("error"):
+        result["judge_error"] = judge_outcome["error"]
+    if judge_outcome.get("verdict") is not None:
+        judge_verdict = judge_outcome["verdict"]
         result["judge_verdict"] = {
             "provider": judge_verdict.provider,
             "diagnosis_coherence": judge_verdict.diagnosis_coherence,
@@ -417,7 +454,22 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         "average_latency_ms": sum(result["latency_ms"] for result in results) / total,
     }
 
-    # LLM Judge aggregate metrics
+    # LLM Judge aggregate metrics — only present when the judge was actually
+    # attempted for at least one case (disabled runs keep the baseline key set).
+    attempted = [r for r in results if r.get("judge_status") in ("succeeded", "failed")]
+    if attempted:
+        metrics["judge_requested"] = len(results)
+        metrics["judge_attempted"] = len(attempted)
+        metrics["judge_succeeded"] = sum(1 for r in attempted if r["judge_status"] == "succeeded")
+        metrics["judge_failed"] = sum(1 for r in attempted if r["judge_status"] == "failed")
+        metrics["judge_skipped"] = len(results) - len(attempted)
+        metrics["judge_provider_mock"] = sum(
+            1 for r in attempted if r.get("judge_verdict", {}).get("provider") == "mock"
+        )
+        metrics["judge_provider_llm"] = sum(
+            1 for r in attempted if r.get("judge_verdict", {}).get("provider") == "llm"
+        )
+
     judge_results = [r for r in results if r.get("judge_verdict")]
     if judge_results:
         metrics["judge_diagnosis_coherence"] = (
@@ -531,7 +583,14 @@ def main() -> None:
     )
     print(f"Evaluated {report['total_cases']} cases")
     print(f"retrieval_mode: {report['retrieval_mode']}")
-    print(f"judge: {'enabled' if report.get('judge_enabled') else 'disabled'}")
+    if report.get("judge_enabled"):
+        metrics = report["metrics"]
+        print(
+            "judge: enabled "
+            f"(succeeded {metrics.get('judge_succeeded', 0)}, failed {metrics.get('judge_failed', 0)})"
+        )
+    else:
+        print("judge: disabled")
     for name, value in report["metrics"].items():
         if name == "average_latency_ms":
             print(f"{name}: {value:.2f}")
