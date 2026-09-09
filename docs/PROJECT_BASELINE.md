@@ -10,9 +10,9 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）与 F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试，88 passed） |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）与 F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛，92 passed） |
 | 当前阶段 | 主链路功能已存在，进入正确性与可信度收敛阶段 |
-| 建议下一项 | 按用户节奏：F15（反馈存在性校验）或 F13（Dashboard 竞态）小步推进；F02/F03/F04 待用户消化后开工 |
+| 建议下一项 | 按用户节奏：F13（Dashboard 竞态）小步推进；F02/F03/F04 待用户消化后开工 |
 | 随后处理 | F02/F03：任务幂等、待分析事故去重与恢复；F04：日志时间语义 |
 | 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
 | 暂缓 | 新 Agent 框架、更多检索后端、多 Agent 协作、自动修复、大规模前端重写 |
@@ -227,13 +227,12 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：最新记录查询有数据库限额；慢模型不阻塞健康请求/SSE；不增设第二套执行器。
 - 工作量中；收益高（持续演示与数据增长）。
 
-### F15 · P1：反馈存在性未校验，正向过滤忽略正确性
+### F15 · P1：反馈存在性未校验，正向过滤忽略正确性 — **部分完成（2026-09-09）**
 
-- 证据：`feedback_service.py:10` 直接 upsert；`app/database.py` 未启用 SQLite 外键检查；正向查询只看 rating，未看 is_diagnosis_correct。
-- 后果：不存在 analysis ID 可写反馈（**已复现**）；高评分但判错也列为正向。当前未接自动学习，不宣称已污染检索库。
-- 修改：服务层校验目标并返回 404；启用外键前检查旧数据；正向同时要求正确性，人工确认后才可入历史库。
-- 验收：不存在对象、并发重复反馈、rating 高但 incorrect、旧库迁移行为明确。
-- 工作量中（service、DB、测试）；收益中（反馈完整性）。
+- 证据（历史）：`feedback_service.py:10` 曾直接 upsert；`app/database.py` 未启用 SQLite 外键检查；正向查询只看 rating，未看 is_diagnosis_correct。不存在 analysis ID 可写反馈（已复现）。
+- 修改（已实施）：`upsert_feedback` 服务层校验目标 AnalysisRun 存在、不存在返回 404；并发重复提交撞唯一约束时转为更新已有行（不再 500）；`list_positive_feedback` 正向 = 高评分且 `is_diagnosis_correct=True`。
+- 验收：新增 tests/test_feedback.py 4 项（404、upsert 收敛单行、5 星但判错不进正向、min_rating 边界），旧代码下反向验证 2 项判别测试失败；全套 92 passed。
+- 剩余：`app/database.py` 启用 SQLite 外键检查未做——需先扫描旧库孤儿数据、评估全库写入路径风险（F02 状态变更/历史数据）后单独推进；当前服务层验票已挡住新孤儿，检索未接反馈数据（无实际污染）。
 
 ### F16 · 真实数据/共享部署前阻断：缺少身份边界
 
@@ -375,6 +374,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-09 | Runbook 检索重优化（用户批准计划，全配置消融主战场）：4 个杠杆实施 + 逐轮数据裁决；保留 hard 过滤与默认融合参数；RUNBOOK_FILTER_MODE/PIPELINE_VARIANT_TOP_K/RRF_K 保留为环境配置项（默认值=历史行为）；旧 95.45% 复现失败正式作废 | 71 passed（+9 标注回归）；27 例 Top-1 88.89%/Recall 84.57%/P@3 74.07%；22 例消融 tfidf 单查询 Top-1 100%、5 配置 effective_mode 全部与请求后端一致；4 后端对比 hybrid 92.59% | F11 验收：Top-1 ≥75% 达标、Recall ≥85% 差 0.43；剩余 5 例检索失败已逐一归因（2 跨类型结构性 + 3 稀疏词面限制）；F12 有效后端验证部分完成；F01/F02/F03/F04/F07 不变，下一步 F01 |
 | 2026-09-09 | 修复评测 Judge 静默失效（F07，用户按"小步消化"节奏批准）：`_run_judge` 去掉对 list[dict] 的 `model_dump()` 调用、失败不再返回 None；报告按案例写 judge_status/judge_error，汇总写 requested/attempted/succeeded/failed/skipped 与 provider；新增 `_desensitize_error`（URL/长 token 脱敏）；`passed` 判定语义保持不变 | 新增 tests/test_eval_judge.py 4 项，全套 85 passed；27 例开 Judge 实测 succeeded=27/27（修复前 27/27 静默失败），证据 runtime/audit/eval-f07-judge-20260909-132424.md | F07 标记已验证完成；下一步按用户节奏 F01（分析结果事务原子性） |
 | 2026-09-09 | 修复分析结果原子性（F01，用户批准）：persistence 进度消息从 flush 后移到 `db.commit()` 之后（文案改过去式），进度回调在分析全程只于只读阶段触发；结果、证据、Trace 一次提交 | 新增 tests/test_analysis_transaction.py 3 项（第二连接中间状态观察、Trace 注入失败回滚、run_job 端到端失败）；反向验证旧代码下 3 项全失败；全套 88 passed | F01 标记已验证完成；下一步按用户节奏 F15 或 F13 |
+| 2026-09-09 | 修复反馈完整性（F15，用户批准）：upsert 服务层校验目标存在（404）、并发撞唯一约束转更新、正反馈 = 高评分 + 判定正确；SQLite 外键开关本轮不做（需先扫旧库孤儿数据，F15 剩余项） | 新增 tests/test_feedback.py 4 项，旧代码下反向验证 2 项判别测试失败；全套 92 passed | F15 标记部分完成（外键启用留待旧数据扫描后）；下一步按用户节奏 F13 |
 
 每次工作更新此模板，不另建竞争性总计划：
 
