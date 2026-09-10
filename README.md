@@ -94,6 +94,18 @@ API Docs:  http://127.0.0.1:8000/docs
 Dev Tools: http://127.0.0.1:8000/dev-tools
 ```
 
+### 接真实数据前：门锁与限额（F16）
+
+默认是演示模式：不设钥匙，所有接口开放。**对外共享部署或写入真实日志前**，至少设置接入钥匙，全部接口（含页面与 /health）随后都要求请求头 `X-API-Key` 与钥匙一致，否则 401；钥匙不写入任何日志与错误信息。
+
+```powershell
+$env:AUTH_API_KEY = "<随机长字符串>"            # 必须设置；不设 = 演示模式全开放
+$env:MAX_REQUEST_BODY_BYTES = "1000000"        # 可选：请求体上限，默认 1MB，<=0 不限
+$env:WRITE_RATE_LIMIT_PER_MINUTE = "600"       # 可选：每 IP 每分钟写入次数，默认 600，<=0 不限
+```
+
+调用方（脚本/采集器）带上 `X-API-Key` 头即可。限流状态在进程内存中（重启清零、多进程各算各的），只覆盖单进程部署。
+
 ## Demo Shop
 
 终端 1，启动 Incident Copilot：

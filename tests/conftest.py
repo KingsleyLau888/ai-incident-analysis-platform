@@ -21,6 +21,9 @@ def isolate_retrieval_environment(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("AUTH_API_KEY", raising=False)
+    monkeypatch.delenv("MAX_REQUEST_BODY_BYTES", raising=False)
+    monkeypatch.delenv("WRITE_RATE_LIMIT_PER_MINUTE", raising=False)
     get_sentence_transformer_embedder.cache_clear()
     yield
     get_sentence_transformer_embedder.cache_clear()

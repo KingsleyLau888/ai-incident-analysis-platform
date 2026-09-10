@@ -65,8 +65,10 @@ PIPELINE_TRACE_STEPS = (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def detect_features() -> dict[str, bool | str]:
+def detect_features() -> dict[str, bool | str | int]:
     """Return which advanced features are currently active."""
+    from app.auth import auth_enabled
+    from app.middleware import max_body_bytes, write_rate_per_minute
     from app.services.embedding_service import (
         CROSS_ENCODER_ENABLED,
         get_cross_encoder,
@@ -91,6 +93,10 @@ def detect_features() -> dict[str, bool | str]:
         "sentence_transformer_available": has_dense,
         "llm_provider": os.getenv("LLM_PROVIDER", "mock"),
         "chunking_strategy": os.getenv("CHUNKING_STRATEGY", "markdown"),
+        # F16：门锁与限流状态（只报状态与限额，绝不输出钥匙本身）
+        "auth_enabled": auth_enabled(),
+        "request_size_limit_bytes": max_body_bytes(),
+        "write_rate_limit_per_minute": write_rate_per_minute(),
     }
 
 

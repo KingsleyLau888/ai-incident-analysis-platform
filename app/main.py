@@ -11,6 +11,7 @@ from app.database_migrations import (
     ensure_incident_source_column,
     ensure_log_time_columns,
 )
+from app.middleware import apply_request_protection
 from app.models import base
 from app.services import analysis_job_service
 
@@ -37,6 +38,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # 请求保护（F16）：大小上限 + 写入频率限流（环境变量可调，默认宽松）
+    apply_request_protection(app)
     app.include_router(router)
     return app
 

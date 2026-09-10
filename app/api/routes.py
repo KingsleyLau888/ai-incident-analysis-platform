@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import verify_api_key
 from app.database import SessionLocal, get_db
 from app.schemas.analysis import AnalysisRunRead, AnalysisTraceRead
 from app.schemas.analysis_job import AnalysisJobRead
@@ -29,7 +30,9 @@ from app.services import (
     service_service,
 )
 
-router = APIRouter()
+# 路由级门锁（F16）：AUTH_API_KEY 未设置时放行（演示模式），设置后全部接口
+# （含 /health 与页面）都要求 X-API-Key 钥匙，否则 401。
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 # Dashboard templates
 templates = Jinja2Templates(directory=Path(__file__).resolve().parents[2] / "templates")
