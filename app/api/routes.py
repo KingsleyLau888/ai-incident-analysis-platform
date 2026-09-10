@@ -236,7 +236,12 @@ def create_analysis_job(
 ):
     if incident_service.get_incident(db, incident_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+    # 防连点（F02）：已有排队中/进行中的任务时复用原任务；
+    # 已完成的任务不拦——再次触发视为有意重分析，会新建任务。
+    job = analysis_job_service.find_active_job(db, incident_id)
+    if job is None:
+        job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+    # 对复用任务补一次执行是安全的：领取是原子条件更新，重复触发不产生重复结果
     background_tasks.add_task(analysis_job_service.run_job, db.get_bind(), job.id)
     return job
 

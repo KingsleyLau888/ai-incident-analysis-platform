@@ -10,14 +10,14 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed） |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed） |
 | 当前阶段 | 主链路功能已存在，进入正确性与可信度收敛阶段 |
-| 建议下一项 | 按用户节奏：F13/F14 浏览器实测收尾后，建议 F02/F03/F04（任务幂等、事故去重、时间语义）或 F16（真实数据/共享部署前的安全边界）；待用户消化后开工 |
-| 随后处理 | F02/F03：任务幂等、待分析事故去重与恢复；F04：日志时间语义 |
+| 建议下一项 | F03（自动去重不依赖未生成结果 + 事故与任务一致性边界，含 F02 遗留的并发唯一约束与手动 analyze 建 job）；F04、F16 随后；待用户消化后开工 |
+| 随后处理 | F04：日志时间语义；F16：真实数据/共享部署前安全边界 |
 | 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
 | 暂缓 | 新 Agent 框架、更多检索后端、多 Agent 协作、自动修复、大规模前端重写 |
 | 运行基线 | Mock + TF-IDF + pipeline，关闭 CrossEncoder，单进程、本地隔离数据 |
-| 未验证 | 真实模型 API、多进程重启恢复、浏览器交互、压力测试（dense/Chroma 已实测：见 optimization_report_2026-09） |
+| 未验证 | 真实模型 API、多进程重启恢复（单进程重启恢复已实测）、浏览器交互、压力测试（dense/Chroma 已实测：见 optimization_report_2026-09） |
 
 接手先检查 `git status --short`。审查前已有 Mock confidence、时间序列化、事故窗口、Demo 页面和测试等修改，以及 `tmp/` 未跟踪内容。本次保留了它们，不要误判为本轮审查已经修复的问题。
 
@@ -120,21 +120,24 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 证据（历史）：`app/services/analysis_service.py:279` 曾在 flush AnalysisRun 后发送 persistence 进度；`analysis_job_service._set_progress` 在同一 Session commit，把半成品 AnalysisRun 提前提交。
 - 修改（已实施）：persistence 进度从提交前移到 `db.commit()` 之后，文案改过去式；分析全程的进度回调只发生在只读阶段，结果、证据、Trace 一次性原子提交。SQLite 下不另开写事务（进度更新仍走同一 Session，仅提交 job 行）。
 - 验收：新增 3 项故障注入测试（第二连接观察中间状态 + Trace 写入注入失败 + run_job 端到端），并做反向验证：旧代码下 3 项全失败、新代码下全通过。全套 88 passed。
-- 备注：若提交后的进度回调自身抛异常，任务会标 failed 但完整结果已落盘（可追踪，非半成品）；属 F02 任务/结果关系范畴。
+- 备注：若提交后的进度回调自身抛异常，任务会标 failed 但完整结果已落盘（可追踪，非半成品）；任务/结果关系边界归 F03 处理。
 
-### F02 · P0：任务不幂等，缺少可靠恢复
+### F02 · P0：任务不幂等，缺少可靠恢复 — **已修复（2026-09-10）**
 
-- 证据：`analysis_job_service.py:31` 不原子领取 pending 状态，直接设 running；API 使用进程内 BackgroundTasks；`app/main.py` 无恢复逻辑。
-- 后果：同 job 重跑产生重复结果（**已复现**）；进程退出可能留下 pending/running（代码确认，重启实测待做）；初始进度提交还在 try 外。
-- 修改：数据库条件更新领取任务；成功任务重入返回已有结果；定义重试次数、超时和过期任务处理。先修状态契约，再按部署需求决定是否引入独立 worker。
-- 验收：重复/并发执行同 job 最多一个有效结果；中断状态能回收或明确失败；初始提交异常有处理。
-- 工作量高（执行、恢复跨层）；收益高（防重复调用、悬挂和费用浪费）。
+- 证据（历史）：`analysis_job_service.py:31` 曾不原子领取 pending 状态，直接设 running；API 使用进程内 BackgroundTasks；`app/main.py` 曾无恢复逻辑；初始进度提交在 try 外。
+- 修改（已实施）：
+  - `_try_claim` 数据库条件更新领取（仅 pending 可领取），并发执行同 job 只有一个赢家；
+  - 成功任务重入不重跑，复用已有结果；初始进度提交移入 try（异常记 failed 不卡 running）；
+  - `recover_interrupted_jobs` 开机清场：running→failed（写明中断原因）、pending→重新执行，经 lifespan 接入启动；
+  - POST /analysis-jobs 防连点：已有 pending/running 任务时复用原任务并补发执行；完成后再次触发视为有意重分析（新建任务）。
+- 验收：并发执行同 job 最多一个有效结果；中断状态恢复或明确失败；初始提交异常记 failed。新增 tests/test_f02_job_idempotency.py 7 项，全套 105 passed；旧代码下反向验证 6 项失败；临时库重启实测 running→failed（原因明确）、pending→succeeded，启动日志输出恢复摘要（运行库未动）。
+- 遗留/边界：恢复语义仅适用单进程部署（多 worker 时 running 可能属于其他进程，需心跳机制）；无自动重试（重试=新建任务）；不引入独立 worker；并发 POST 先查后建仍有竞态窗口（需数据库级约束，归 F03）。
 
 ### F03 · P0：自动去重依赖尚未生成的分析结果
 
 - 证据：`incident_detector.py:68` 找到同 issue type 的 AnalysisRun 才认作同类；`automatic_incident_service.py:25` 创建事故、任务分开提交。
 - 后果：首次分析未完成，持续日志继续创建同类事故。**顺序探针已复现，不需并发。** 并发先查后建另有竞态风险。
-- 修改：创建 Incident 时保存 source、初步类型/聚合键与窗口；去重不依赖未来诊断。明确事故与任务的一致性边界，增加数据库冲突处理。
+- 修改：创建 Incident 时保存 source、初步类型/聚合键与窗口；去重不依赖未来诊断。明确事故与任务的一致性边界，增加数据库冲突处理。承接 F02 遗留：并发任务创建的唯一约束（先查后建竞态窗口）、手动 analyze 建 job 与 Dashboard 口径。
 - 验收：同窗口同类错误在 pending/running 时复用事故；不同故障不误合并；同名服务并发注册有稳定返回。
 - 工作量高（模型、迁移、检测、事务）；收益高（自动接入热路径）。
 
@@ -216,7 +219,7 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 证据（历史）：`templates/dashboard.html:79` 异步返回直接覆盖全局 loadedAnalysis，不检查 selectedIncident；404 直接返回，不清旧诊断；`:75` 只在未缓存时加载，不按 run ID 更新。
 - 修改（已实施）：请求代次计数（analysisSeq）——响应编号对不上即丢弃；切换事故先清空面板并显示"加载中"，404 显示"该 Incident 暂无分析结果"；按 run ID 缓存（loadedAnalysisFor），job 新 run 自动重载；404 后记录已尝试的 run id 防重复请求；统计卡口径标注"最近错误日志（50 条内）"。
 - 验收：node --check 语法通过；五场景竞态走查（A→B 逆序、404、新 run、网络中断自动重试、job 运行/失败）；全套 92 passed（后端无影响）。**浏览器实测待用户配合**（响应逆序需快速点击复现）。
-- 遗留：手动 analyze 不建 job，Dashboard 无从得知新结果（需切走再切回）；与 F14 的 SSE 口径一并处理。
+- 遗留：手动 analyze 不建 job，Dashboard 无从得知新结果（需切走再切回）；归入 F03 事故与任务一致性边界处理。
 
 ### F14 · P1：SSE 全量查询与模拟流式阻塞 — **已修复（2026-09-09）**
 
@@ -376,6 +379,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-09 | 修复反馈完整性（F15，用户批准）：upsert 服务层校验目标存在（404）、并发撞唯一约束转更新、正反馈 = 高评分 + 判定正确；SQLite 外键开关本轮不做（需先扫旧库孤儿数据，F15 剩余项） | 新增 tests/test_feedback.py 4 项，旧代码下反向验证 2 项判别测试失败；全套 92 passed | F15 标记部分完成（外键启用留待旧数据扫描后）；下一步按用户节奏 F13 |
 | 2026-09-09 | 修复 Dashboard 竞态（F13，用户批准）：analysisSeq 请求编号丢弃过期响应；切换即清空面板并显式"加载中"；按 run id 缓存、job 新 run 自动重载；404 空态 + 防重复请求；统计卡标注 50 条口径 | 验证：node --check 语法通过；五场景竞态走查；全套 92 passed（纯前端改动）；浏览器实测待用户配合（无 JS 测试基建，未做反向验证） | F13 标记已修复（浏览器实测为收尾）；下一步建议 F14（SSE 全量查询）或 F02/F03/F04 |
 | 2026-09-09 | 修复 SSE 全量查询与模拟流式（F14，用户批准）：list_* 加 limit 参数、/events 快照抽 _build_snapshot 数据库侧限额 50；/analyze/stream 分析移工作线程（同一执行器）+ 进度经线程安全队列实时上报 + 诊断文本标注 simulated: true | 新增 tests/test_f14_sse_and_stream.py 6 项，旧代码下反向验证 5 项失败；全套 98 passed；真实服务冒烟通过（实时进度/complete/simulated 均验证）；TestClient 无法消费无限流（starlette 限制），快照逻辑函数级测试覆盖 | F14 标记已修复；下一步建议 F02/F03/F04 或 F16 |
+| 2026-09-10 | 修复任务幂等与启动恢复（F02，用户批准）：`_try_claim` 原子领取（条件更新，仅 pending 可领）；成功任务重入不重跑；初始进度提交移入 try；`recover_interrupted_jobs` 开机清场（running→failed 写明原因、pending→重新执行）经 lifespan 接入；POST /analysis-jobs 防连点复用未完成任务；重试语义=新建任务，无自动重试 | 新增 tests/test_f02_job_idempotency.py 7 项，旧代码下反向验证 6 项失败（1 项语义记录测试新旧一致）；全套 105 passed；临时库重启实测 running→failed、pending→succeeded、启动日志输出恢复摘要（运行库未动） | F02 标记已修复；遗留（并发先查后建唯一约束、手动 analyze 建 job、多 worker 心跳）归 F03；下一步建议 F03 |
 
 每次工作更新此模板，不另建竞争性总计划：
 
