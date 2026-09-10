@@ -139,6 +139,30 @@ class RunbookRetriever:
             for index, score in ranked
         ]
 
+    def retrieve_with_query(
+        self,
+        query: str,
+        top_k: int = 3,
+        issue_type: str | None = None,
+    ) -> list[RetrievedRunbookChunk]:
+        """按调用方给定的查询文本检索（F06）：Agent 的调查查询真正进入检索输入。
+
+        与 retrieve() 的区别：不再由证据日志拼查询；issue_type 仅用于
+        类型过滤（None = 不过滤，调查阶段允许跨类型召回）。
+        """
+        documents = [f"{chunk.source}\n{chunk.title}\n{chunk.content}" for chunk in self.chunks]
+        ranked = self._rank(query, documents, top_k, issue_type=issue_type)
+        return [
+            RetrievedRunbookChunk(
+                chunk_id=self.chunks[index].chunk_id,
+                source=self.chunks[index].source,
+                title=self.chunks[index].title,
+                content=self.chunks[index].content,
+                score=round(score, 6),
+            )
+            for index, score in ranked
+        ]
+
     def _rank(
         self,
         query: str,

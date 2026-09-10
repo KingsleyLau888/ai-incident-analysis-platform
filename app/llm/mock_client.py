@@ -14,7 +14,10 @@ class MockLLMClient:
         evidence_logs: list[LogEntry],
         retrieved_runbook_chunks: list[RetrievedRunbookChunk],
         similar_incidents: list[SimilarIncident],
+        investigation_notes: list[str] | None = None,
     ) -> DiagnosisResult:
+        # F06：调查笔记是派生观察（与原始日志分型）；mock 模板化诊断不消费
+        # 笔记内容，仅按证据/手册/历史生成——真实 LLM 客户端会读入提示词。
         evidence_hint = _first_evidence_message(evidence_logs)
         runbook_actions = _actions_from_runbooks(retrieved_runbook_chunks)
         historical_actions = _actions_from_similar_incidents(similar_incidents)

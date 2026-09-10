@@ -37,5 +37,6 @@ class LLMClient(Protocol):
         evidence_logs: list[LogEntry],
         retrieved_runbook_chunks: list[RetrievedRunbookChunk],
         similar_incidents: list[SimilarIncident],
+        investigation_notes: list[str] | None = None,
     ) -> DiagnosisResult:
         ...

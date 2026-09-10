@@ -40,13 +40,6 @@ from app.services.similar_incident_retriever import (
 )
 
 
-class _AgentObservationLog:
-    def __init__(self, message: str) -> None:
-        self.id = 0
-        self.level = "INFO"
-        self.message = message
-        self.timestamp = None
-
 PIPELINE_TRACE_STEPS = (
     "log_filtering",
     "rule_detection",
@@ -510,27 +503,27 @@ def _run_react_agent(
         return {"issue_type": d.issue_type, "severity": d.severity,
                 "matched_issues": d.matched_issues, "evidence_logs": d.evidence_logs,
                 "confidence": d.confidence, "candidate_scores": d.candidate_scores or {}}
-    def retrieve_runbooks_fn(query, top_k):
-        return runbook_retriever.retrieve(
-            incident_title=incident.title, service_name=service_name,
-            evidence_logs=detection.evidence_logs, issue_type=detection.issue_type,
-            top_k=top_k)
-    def retrieve_similar_incidents_fn(query, top_k):
-        return similar_incident_retriever.retrieve(
-            incident_title=incident.title, service_name=service_name,
-            issue_type=detection.issue_type, evidence_logs=detection.evidence_logs,
-            top_k=top_k)
+    def retrieve_runbooks_fn(query, top_k, issue_type=None):
+        # F06：Agent 的调查查询真正进入检索输入（不再忽略 query）
+        return runbook_retriever.retrieve_with_query(
+            query, top_k=top_k, issue_type=issue_type)
+    def retrieve_similar_incidents_fn(query, top_k, issue_type=None):
+        return similar_incident_retriever.retrieve_with_query(
+            query, top_k=top_k, issue_type=issue_type)
     def generate_diagnosis_fn(ctx):
-        evidence_logs = list(ctx.get("evidence_logs", detection.evidence_logs))
-        evidence_logs.extend(
-            _AgentObservationLog(f"Agent investigation note: {note}")
-            for note in ctx.get("investigation_notes", [])
-        )
+        # F06：原始日志（带真实 log id）与派生观察分型，不再把调查笔记
+        # 伪装成 id=0 的日志混进证据；关键词命中的日志按 id 去重并入证据
+        evidence_logs = list(ctx.get("evidence_logs") or detection.evidence_logs)
+        matched = {getattr(log, "id", None): log for log in ctx.get("keyword_matches", [])}
+        for log in evidence_logs:
+            matched.pop(getattr(log, "id", None), None)
+        evidence_logs.extend(matched.values())
         return get_llm_client().diagnose(
             incident_title=incident.title, service_name=service_name,
             issue_type=ctx.get("issue_type", detection.issue_type),
             severity=ctx.get("severity", detection.severity),
             evidence_logs=evidence_logs,
+            investigation_notes=list(ctx.get("investigation_notes", [])),
             retrieved_runbook_chunks=ctx.get("runbook_chunks", []),
             similar_incidents=ctx.get("similar_incidents", []))
 
@@ -545,8 +538,31 @@ def _run_react_agent(
     final_context = result.final_context or {}
     retrieved = final_context.get("runbook_chunks", [])
     sim = final_context.get("similar_incidents", [])
-    diagnosis_result = result.final_diagnosis or generate_diagnosis_fn(final_context)
+    if result.insufficient_evidence:
+        # F05：证据不足时不调用诊断，如实落一个"证据不足"的占位结果
+        diagnosis_result = _insufficient_evidence_diagnosis()
+    else:
+        diagnosis_result = result.final_diagnosis or generate_diagnosis_fn(final_context)
     return retrieved, sim, result, diagnosis_result
+
+
+def _insufficient_evidence_diagnosis():
+    """证据不足时的占位诊断（F05）：诚实说明，不伪装成正常诊断。"""
+    from app.llm.base import DiagnosisResult, StructuredDiagnosis
+
+    return DiagnosisResult(
+        diagnosis=StructuredDiagnosis(
+            diagnosis_summary=(
+                "Insufficient evidence: the investigation ended without "
+                "successful log search and signal detection. No diagnosis "
+                "was generated."
+            ),
+            root_cause_hypotheses=[],
+            impact_scope="",
+            structured_suggested_actions=[],
+        ),
+        provider="react_insufficient_evidence",
+    )
 
 
 def _get_react_llm_client():
@@ -596,7 +612,8 @@ def _persist_react_trace(
         ("react_agent_context", 1,
          f"Agent mode: {react_result.provider}; total_steps={len(react_result.steps)}; "
          f"logs_count={len(logs)}; issue_type={detection.issue_type}; "
-         f"confidence={detection.confidence:.2f}"),
+         f"confidence={detection.confidence:.2f}; "
+         f"insufficient_evidence={react_result.insufficient_evidence}"),
     ]
     for step in react_result.steps:
         detail = " | ".join(filter(None, [

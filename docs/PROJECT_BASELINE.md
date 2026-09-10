@@ -10,9 +10,9 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed）、F03（事故去重依赖初步类型、事故任务原子提交、并发单建锁+唯一索引、手动分析建任务、服务重名稳定返回，115 passed）、F04（时间账本：入账统一 UTC（实测旧代码 +08:00 偏 8 小时）、计数窗口补上界、received_at 送达时间、source 出身代替标题、手动分析窗口封顶，129 passed）、F16（可选接入钥匙门锁 + 请求大小/写入频率限额 + 凭据不泄漏，140 passed）、F15 收尾（SQLite 外键检查开启：运行库体检 9 类孤儿全 0，147 passed）。**P0 全部收工（A 路线 + 共享部署安全边界）** |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed）、F03（事故去重依赖初步类型、事故任务原子提交、并发单建锁+唯一索引、手动分析建任务、服务重名稳定返回，115 passed）、F04（时间账本：入账统一 UTC（实测旧代码 +08:00 偏 8 小时）、计数窗口补上界、received_at 送达时间、source 出身代替标题、手动分析窗口封顶，129 passed）、F16（可选接入钥匙门锁 + 请求大小/写入频率限额 + 凭据不泄漏，140 passed）、F15 收尾（SQLite 外键检查开启：运行库体检 9 类孤儿全 0，147 passed）、F05（Agent 取证门禁：成功状态记录 + 诊断前置校验 + 未知动作报决策错误 + 参数限额 + insufficient_evidence）与 F06（检索查询透传 + 证据分型溯源 + 笔记不冒充日志，159 passed）。**P0 全部收工（A 路线 + Agent 门禁 + 共享部署安全边界）** |
 | 当前阶段 | 主链路功能已存在，正确性与可信度收敛阶段（P0 完成） |
-| 建议下一项 | F05/F06（Agent 取证前置条件与证据来源，F05 为 P0 Agent 项）或 F17（配置治理）/F18（日志接入缓冲）等 P1 事项；待用户消化后选 |
+| 建议下一项 | F17（配置治理）/F18（日志接入缓冲）等 P1 事项；进行中 |
 | 随后处理 | F10/F12 真实模型评测剩余指标（需真实 API）；F13/F14 浏览器实测（需用户配合） |
 | 随后处理 | F16：真实数据/共享部署前安全边界 |
 | 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
@@ -160,21 +160,26 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：新增 tests/test_f04_time_semantics.py 14 项（+08:00 与 UTC 同一时刻合并计数、未来时间不凑数、晚到日志按自身窗口、边界同刻含/界外不含、极端倒序投递已知限制锁定、手动封顶不混入事后日志、出身不看标题、received_at 区分送达与发生、老库迁移加列/回填/归一）。全套 129 passed；旧代码反向验证 11/14 挂（3 过：2 项旧行为本就正确、1 项旧 bug 互相抵消，均记录在案）；运行库迁移完成（35 条日志 received_at 全回填、时间戳本已规范 0 改写；10 事故出身回填 9 manual + 1 automatic）；真实服务冒烟通过（+08:00 入账库存 UTC 12:00、API 输出北京时间 20:00、received_at 自动盖戳）。
 - 遗留/边界：极端倒序投递（3 条错误完全倒着送到）在纯事件时间窗口下不触发——需水位线/乱序缓冲机制，超出本轮范围（已知限制，测试锁定语义）；received_at 暂只记录展示；历史数据中若有用 +08:00 上报的日志，其存储时间偏 8 小时且无法事后分辨（运行库 35 条全部无偏移文本、时序合理，未发现异常）。
 
-### F05 · P0（Agent）：必要取证步骤只写在提示词里
+### F05 · P0（Agent）：必要取证步骤只写在提示词里 — **已修复（2026-09-10）**
 
-- 证据：`react_agent.py:239` 首步可终止，最后一步强制生成；`:339` 未知动作改成 generate_diagnosis；无成功工具前置状态检查，参数未按 schema 完整验证。
-- 后果：零取证也可进入诊断（**调用路径已复现，未评估真实模型答案**）；重复调用只由 prompt 禁止，工具失败成为文本后继续。
-- 修改：代码记录成功执行状态，校验诊断前置条件；未知动作明确报决策错误；强类型参数及限额；不足时返回 insufficient_evidence，不用增加 MAX_STEPS 掩盖。
-- 验收：首步结束、未知动作、重复参数、工具异常、非法 top_k、预算耗尽都有明确行为。
-- 工作量中（Agent、测试）；收益高（防无证据诊断）。
+- 证据（历史）：`react_agent.py:239` 首步可终止，最后一步强制生成；`:339` 未知动作改成 generate_diagnosis；无成功工具前置状态检查，参数未按 schema 完整验证。零取证也可进入诊断（调用路径已复现，未评估真实模型答案）。
+- 修改（已实施）：
+  - 代码记录成功执行状态：`ctx["successful_tools"]`（真正执行成功才计入，参数非法/异常不计）；
+  - 诊断前置条件：generate_diagnosis 要求先完成 search_logs + detect_signals；中途请求诊断 → 记决策错误并继续调查；预算耗尽时证据不全 → 返回 `insufficient_evidence=True`（final_diagnosis=None），分析服务落"证据不足"占位结果并写入 Trace，不再强制生成；
+  - 未知动作不再静默转 generate_diagnosis：记"Decision error: unknown tool"并继续；
+  - 重复调用由代码拒绝（seen_calls 键=工具名+参数），不再只靠提示词；
+  - 参数强类型与限额：`_bounded_int`（top_k 1-20、limit 1-50、keyword 非空），非法参数报 `_ToolInputError` 且不计成功。
+- 验收：新增 tests/test_f05_agent_safeguards.py 6 项（零取证诊断拒绝、预算耗尽如实返回、未知动作继续调查、重复调用拒绝、非法 top_k 拒绝、确定性工作流不受门禁影响）；全套 159 passed（含 F06 新增）；旧代码反向验证 F05/F06 共 11/12 失败（1 过：查询回退为旧行为锁定项）。
 
-### F06 · P1：Agent 查询未传入检索器，证据来源混用
+### F06 · P1：Agent 查询未传入检索器，证据来源混用 — **已修复（2026-09-10）**
 
-- 证据：`analysis_service.py:473` 两个检索闭包接收 query 但未使用；`:484` 将 investigation_notes 包成 `id=0` 日志传给 LLM；notes 来自工具统计和摘要。
-- 后果：Trace 看似按新查询调查，实际仍用初始上下文；派生摘要和原始日志混入同一字段；关键词搜索的匹配日志也未自然进入最终 evidence。**代码确认。**
-- 修改：增加接受 query 的公开检索方法；原始日志、派生观察、历史参考分别带类型和来源 ID；结论只引用本次已收集来源。
-- 验收：query 变化真正改变检索输入；调查证据可回溯 log ID；统计说明不冒充原始日志。
-- 工作量中（Agent、检索接口）；收益高（调查路径与结果一致）。未发现跨会话记忆自动写回，不称其为“长期记忆被模型自言自语污染”。
+- 证据（历史）：`analysis_service.py:473` 两个检索闭包接收 query 但未使用；`:484` 将 investigation_notes 包成 `id=0` 日志传给 LLM；notes 来自工具统计和摘要。**代码确认。**
+- 修改（已实施）：
+  - `RunbookRetriever.retrieve_with_query(query, top_k, issue_type=None)` 与 `SimilarIncidentRetriever.retrieve_with_query(query, top_k, issue_type=None)` 公开查询检索方法；Agent 闭包改用它，调查查询真正进入检索输入（issue_type=None 时不过滤，调查阶段允许跨类型召回）；
+  - 原始日志与派生观察分型：`_AgentObservationLog`（id=0 假日志）移除；`diagnose()` 全链路（Protocol/mock/openai_compatible）新增 `investigation_notes` 参数，真实 LLM 提示词以独立字段读入笔记，不再与 evidence_logs 混用；
+  - 关键词搜索命中的日志按 log id 去重进入 `ctx["keyword_matches"]`，最终并入诊断证据（真实 log id，可回溯），笔记中记录命中 id 列表；
+  - 结论只引用本次收集的来源：证据/笔记/手册/历史全部来自当前 ctx。
+- 验收：新增 tests/test_f06_evidence_sources.py 6 项（查询透传、回退查询、公开检索方法、关键词命中 id 记录、真实 LLM payload 分型字段）；全套 159 passed；旧代码反向验证 F05/F06 共 11/12 失败（1 过：查询回退为旧行为锁定项）。
 
 ### F07 · P0（评估）：Judge 调用前失败，被静默忽略 — **已修复（2026-09-09）**
 
@@ -397,6 +402,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-10 | 修复日志时间语义（F04，用户批准）：入账统一 UTC（`create_log_entry` 显式归一，实测旧代码 +08:00 输入丢偏移量偏 8 小时）；计数窗口补上界 `[max(t-60s, since), t]` 闭区间；`received_at` 送达时间列（服务器盖戳+展示）；`source` 出身列代替标题判断（手动分析窗口同样以创建时刻封顶）；迁移 `ensure_log_time_columns`/`ensure_incident_source_column`（幂等，启动接入） | 新增 tests/test_f04_time_semantics.py 14 项；全套 129 passed；旧代码反向验证 11/14 失败（3 过：naive 按 UTC 与边界同刻旧行为本就正确、+08:00 同刻合并系旧双 bug 抵消，均记录）；运行库迁移完成（35 条日志 received_at 全回填、时间戳本已规范 0 改写；10 事故出身 9 manual + 1 automatic）；真实服务冒烟（+08:00 入账库存 UTC 12:00、received_at 自动盖戳、启动无报错，冒烟数据已清理） | F04 标记已修复；**A 路线（结果可靠）全线收工**；下一步建议 F16（真实数据/共享部署前安全边界） |
 | 2026-09-10 | 修复接入安全边界（F16，用户批准）：可选接入钥匙（`AUTH_API_KEY` 未设=演示全开放，设置后全接口要求 `X-API-Key`，compare_digest 防时序、401 不泄钥匙）；请求大小上限（Content-Length 快速拒绝 + 实际字节兜底，413）与写入频率限流（每 IP 滑动窗口，429 + Retry-After，读取不计，零值关闭）；`/features` 如实显示门锁/限额状态；README 增"接真实数据前"小节 | 新增 tests/test_f16_auth_and_limits.py 11 项；全套 140 passed；旧代码反向验证 9/11 失败（2 过：演示模式全开放为锁定行为、旧代码全放行使"对钥匙 200"必然通过）；真实服务冒烟（带锁启动：无钥匙 401/对钥匙 200/超包 413/第三次写入 429+retry-after 59/读取不受限/面板无钥匙泄漏，冒烟数据已清理） | F16 标记已修复；**P0 全部收工**；下一步建议 F10/F12 真实模型评测剩余指标或 F15 剩余（SQLite FK pragma） |
 | 2026-09-10 | F15 收尾（用户批准，全程无需用户参与）：`enable_sqlite_foreign_keys` 每连接 `PRAGMA foreign_keys=ON`（应用引擎接入）；`scan_foreign_key_orphans` 体检 9 类外键孤儿（含 feedback 表名核实为 diagnosis_feedback） | 新增 tests/test_f15_foreign_keys.py 7 项（应用引擎 PRAGMA=1、孤儿日志/事故/任务写入被数据库拒绝、合法写入不受影响、体检报数准确含老库孤儿模拟、空库安全）；全套 147 passed；旧代码反向验证 7/7 失败；运行库体检 9 类孤儿全 0；真实服务冒烟（正常写入 201、孤儿写入在服务层 404 拦截、启动无报错，冒烟数据已清理） | F15 全部完成；**P0 全部收工**；下一步建议 F05/F06（Agent 取证前置）或 F17/F18（P1） |
+| 2026-09-10 | F05 + F06（用户授权全自主推进）：F05 Agent 取证门禁（successful_tools 状态记录、generate_diagnosis 前置 search_logs+detect_signals、未知动作报决策错误不再静默转诊断、seen_calls 代码级拒绝重复调用、_bounded_int 参数限额、预算耗尽证据不足返回 insufficient_evidence 并落占位诊断+Trace 标注）；F06 证据来源分型（retrieve_with_query 公开查询检索、_AgentObservationLog 假日志移除、diagnose 全链路新增 investigation_notes 独立字段、关键词命中按 log id 去重并入证据） | 新增 tests/test_f05_agent_safeguards.py 6 项 + tests/test_f06_evidence_sources.py 6 项；全套 159 passed；旧代码反向验证 11/12 失败（1 过：查询回退为旧行为锁定项）；现有 3 项 Agent 端到端测试不受门禁影响 | F05/F06 标记已修复；下一步 F17（配置治理）/F18（日志接入缓冲） |
 
 每次工作更新此模板，不另建竞争性总计划：
 

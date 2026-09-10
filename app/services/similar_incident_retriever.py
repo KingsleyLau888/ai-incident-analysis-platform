@@ -167,6 +167,27 @@ class SimilarIncidentRetriever:
             for index, score in ranked
         ]
 
+    def retrieve_with_query(
+        self,
+        query: str,
+        top_k: int = 3,
+        issue_type: str | None = None,
+    ) -> list[SimilarIncident]:
+        """按调用方给定的查询文本检索（F06）：Agent 的调查查询真正进入检索输入。"""
+        documents = [_incident_document(incident) for incident in self.incidents]
+        ranked = self._rank(query, documents, top_k)
+        return [
+            SimilarIncident(
+                historical_id=self.incidents[index].historical_id,
+                title=self.incidents[index].title,
+                issue_type=self.incidents[index].issue_type,
+                similarity_score=round(score, 6),
+                root_cause=self.incidents[index].root_cause,
+                resolution=self.incidents[index].resolution,
+            )
+            for index, score in ranked
+        ]
+
     def _rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
         if self._vector_store is not None:
             incident_index = {

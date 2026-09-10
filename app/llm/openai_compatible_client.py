@@ -32,6 +32,7 @@ class OpenAICompatibleClient:
         evidence_logs: list[LogEntry],
         retrieved_runbook_chunks: list[RetrievedRunbookChunk],
         similar_incidents: list[SimilarIncident],
+        investigation_notes: list[str] | None = None,
     ) -> DiagnosisResult:
         payload = {
             "model": self.model,
@@ -40,7 +41,9 @@ class OpenAICompatibleClient:
                     "role": "system",
                     "content": (
                         "You are an incident diagnosis copilot. Return only valid JSON matching "
-                        "the requested schema. Ground hypotheses in the provided evidence."
+                        "the requested schema. Ground hypotheses in the provided evidence. "
+                        "Investigation notes are derived observations from the investigation "
+                        "tools, not raw logs."
                     ),
                 },
                 {
@@ -52,6 +55,8 @@ class OpenAICompatibleClient:
                             "issue_type": issue_type,
                             "severity": severity,
                             "evidence_logs": [log.message for log in evidence_logs],
+                            # F06：派生观察单独分型传入，不冒充原始日志
+                            "investigation_notes": investigation_notes or [],
                             "retrieved_runbook_chunks": [
                                 {
                                     "source": chunk.source,

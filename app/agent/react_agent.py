@@ -25,6 +25,14 @@ from app.models.log_entry import LogEntry
 from app.services.runbook_retriever import RetrievedRunbookChunk
 from app.services.similar_incident_retriever import SimilarIncident
 
+# F05：代码级门禁（不再只靠提示词）
+_KNOWN_TOOLS = {tool["name"] for tool in TOOL_SCHEMAS}
+_REQUIRED_EVIDENCE_TOOLS = ("search_logs", "detect_signals")
+
+
+class _ToolInputError(ValueError):
+    """工具参数非法（强类型与限额）：作为决策错误显式返回，不吞成泛化失败。"""
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -47,6 +55,8 @@ class AgentResult:
     final_diagnosis: Any | None
     provider: str  # "react_llm" | "react_deterministic"
     final_context: dict[str, Any] = field(default_factory=dict)
+    # F05：证据不足时不给诊断（不用 MAX_STEPS 掩盖零取证）
+    insufficient_evidence: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +225,14 @@ class ReActAgent:
             "runbook_chunks": [],
             "similar_incidents": [],
             "investigation_notes": [],
+            "keyword_matches": [],
+            # F05：代码记录成功执行状态（可序列化为列表，避免 set 进入结果上下文）
+            "successful_tools": [],
         }
 
         steps: list[AgentStep] = []
         history: list[dict[str, Any]] = []
+        seen_calls: set[tuple[str, str]] = set()
 
         for step_num in range(1, self._max_steps + 1):
             if self._llm is not None:
@@ -235,8 +249,60 @@ class ReActAgent:
                     step_num=step_num,
                 )
 
-            # If the agent decides to finish (or we're at the last step)
-            if action_name == "generate_diagnosis" or step_num == self._max_steps:
+            # F05：未知工具是决策错误，不再静默转成 generate_diagnosis
+            if action_name not in _KNOWN_TOOLS:
+                step = AgentStep(
+                    step_number=step_num,
+                    thought=thought,
+                    action=action_name,
+                    action_input=action_input,
+                    observation=(
+                        f"Decision error: unknown tool {action_name!r}. "
+                        "Choose one of the available tools."
+                    ),
+                )
+                steps.append(step)
+                history.append(
+                    {
+                        "step": step_num,
+                        "thought": thought,
+                        "action": action_name,
+                        "observation": step.observation,
+                    }
+                )
+                continue
+
+            if action_name == "generate_diagnosis":
+                # F05：诊断前置条件——必须完成过取证（search_logs + detect_signals）
+                if not self._has_sufficient_evidence(ctx):
+                    message = (
+                        "Decision error: generate_diagnosis requires successful "
+                        "search_logs and detect_signals first. Continue investigating."
+                    )
+                    if step_num == self._max_steps:
+                        return self._insufficient_evidence_result(
+                            steps=steps,
+                            ctx=ctx,
+                            thought=thought,
+                            message=message,
+                        )
+                    step = AgentStep(
+                        step_number=step_num,
+                        thought=thought,
+                        action=action_name,
+                        action_input={},
+                        observation=message,
+                    )
+                    steps.append(step)
+                    history.append(
+                        {
+                            "step": step_num,
+                            "thought": thought,
+                            "action": action_name,
+                            "observation": step.observation,
+                        }
+                    )
+                    continue
                 diagnosis = generate_diagnosis_fn(ctx)
                 steps.append(
                     AgentStep(
@@ -255,8 +321,33 @@ class ReActAgent:
                     provider="react_llm" if self._llm else "react_deterministic",
                 )
 
+            # F05：重复调用由代码拒绝（不再只靠提示词禁止）
+            call_key = (action_name, json.dumps(action_input or {}, sort_keys=True))
+            if call_key in seen_calls:
+                step = AgentStep(
+                    step_number=step_num,
+                    thought=thought,
+                    action=action_name,
+                    action_input=action_input,
+                    observation=(
+                        f"Rejected duplicate tool call: {action_name} with "
+                        f"{action_input or {}}."
+                    ),
+                )
+                steps.append(step)
+                history.append(
+                    {
+                        "step": step_num,
+                        "thought": thought,
+                        "action": action_name,
+                        "observation": step.observation,
+                    }
+                )
+                continue
+            seen_calls.add(call_key)
+
             # Execute the chosen tool
-            observation = self._execute_tool(
+            observation, ok = self._execute_tool(
                 action_name=action_name,
                 action_input=action_input or {},
                 ctx=ctx,
@@ -267,6 +358,8 @@ class ReActAgent:
                 retrieve_runbooks_fn=retrieve_runbooks_fn,
                 retrieve_similar_incidents_fn=retrieve_similar_incidents_fn,
             )
+            if ok:
+                ctx["successful_tools"].append(action_name)
 
             step = AgentStep(
                 step_number=step_num,
@@ -285,23 +378,63 @@ class ReActAgent:
                 }
             )
 
-        # Fallback: force diagnosis at max steps
-        diagnosis = generate_diagnosis_fn(ctx)
+        # 预算耗尽：证据齐全才强制出诊断；否则如实返回证据不足（F05）
+        if self._has_sufficient_evidence(ctx):
+            diagnosis = generate_diagnosis_fn(ctx)
+            steps.append(
+                AgentStep(
+                    step_number=self._max_steps,
+                    thought="Reached maximum steps. Generating diagnosis with available information.",
+                    action="generate_diagnosis",
+                    action_input={},
+                    observation="Structured diagnosis generated.",
+                    is_final=True,
+                )
+            )
+            return AgentResult(
+                steps=steps,
+                final_diagnosis=diagnosis,
+                final_context=dict(ctx),
+                provider="react_llm" if self._llm else "react_deterministic",
+            )
+        return self._insufficient_evidence_result(
+            steps=steps,
+            ctx=ctx,
+            thought="Reached maximum steps without sufficient evidence.",
+            message="Budget exhausted without successful search_logs and detect_signals.",
+        )
+
+    # ------------------------------------------------------------------
+    # Evidence gating helpers (F05)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _has_sufficient_evidence(ctx: dict[str, Any]) -> bool:
+        return all(tool in ctx.get("successful_tools", []) for tool in _REQUIRED_EVIDENCE_TOOLS)
+
+    def _insufficient_evidence_result(
+        self,
+        steps: list[AgentStep],
+        ctx: dict[str, Any],
+        thought: str,
+        message: str,
+    ) -> AgentResult:
         steps.append(
             AgentStep(
-                step_number=self._max_steps,
-                thought="Reached maximum steps. Generating diagnosis with available information.",
+                step_number=steps[-1].step_number + 1 if steps else 1,
+                thought=thought,
                 action="generate_diagnosis",
                 action_input={},
-                observation="Structured diagnosis generated.",
+                observation=f"Insufficient evidence: {message}",
                 is_final=True,
             )
         )
         return AgentResult(
             steps=steps,
-            final_diagnosis=diagnosis,
+            final_diagnosis=None,
             final_context=dict(ctx),
-            provider="react_llm" if self._llm else "react_deterministic",
+            provider="react_llm" if self._llm is not None else "react_deterministic",
+            insufficient_evidence=True,
         )
 
     # ------------------------------------------------------------------
@@ -333,11 +466,11 @@ class ReActAgent:
         try:
             result = self._call_llm(user_prompt)
             thought = result.get("thought", "Proceeding to next step.")
-            action = result.get("action", "generate_diagnosis")
+            action = result.get("action", "")
             action_input = result.get("action_input", {})
-            allowed_actions = {tool["name"] for tool in TOOL_SCHEMAS}
-            if action not in allowed_actions:
-                action = "generate_diagnosis"
+            if not isinstance(action_input, dict):
+                action_input = {}
+            # F05：未知动作不再静默转 generate_diagnosis，交给主循环报决策错误
             return thought, action, action_input
         except Exception:
             # Fall back to deterministic on LLM error
@@ -430,13 +563,17 @@ class ReActAgent:
         detect_signals_fn,
         retrieve_runbooks_fn,
         retrieve_similar_incidents_fn,
-    ) -> str:
-        """Dispatch tool execution and update context."""
+    ) -> tuple[str, bool]:
+        """Dispatch tool execution and update context.
+
+        返回 (observation, success)：只有真正执行成功才计入取证状态（F05）。
+        参数非法（_ToolInputError）与异常都算失败，observation 说明原因。
+        """
         try:
             if action_name == "search_logs":
                 logs = search_logs_fn(ctx)
                 ctx["logs"] = logs
-                return f"Found {len(logs)} log entries."
+                return f"Found {len(logs)} log entries.", True
 
             elif action_name == "detect_signals":
                 result = detect_signals_fn(ctx)
@@ -447,22 +584,28 @@ class ReActAgent:
                     f"Detected issue_type={result.get('issue_type')}, "
                     f"severity={result.get('severity')}, "
                     f"matched_issues={result.get('matched_issues', [])}, "
-                    f"evidence_logs_count={len(result.get('evidence_logs', []))}"
+                    f"evidence_logs_count={len(result.get('evidence_logs', []))}",
+                    True,
                 )
 
             elif action_name == "retrieve_runbooks":
                 query = action_input.get("query") or build_retrieval_query(
                     incident_title, service_name, ctx
                 )
-                chunks = retrieve_runbooks_fn(query, action_input.get("top_k", 3))
+                top_k = _bounded_int(action_input, "top_k", default=3, minimum=1, maximum=20)
+                chunks = retrieve_runbooks_fn(
+                    query, top_k, issue_type=ctx.get("issue_type")
+                )
                 ctx["runbook_chunks"] = chunks
                 sources = [c.source for c in chunks]
-                return f"Retrieved {len(chunks)} runbook chunks: {', '.join(sources) or 'none'}."
+                return f"Retrieved {len(chunks)} runbook chunks: {', '.join(sources) or 'none'}.", True
 
             elif action_name == "query_logs_by_keyword":
                 keyword = str(action_input.get("keyword", "")).strip()
+                if not keyword:
+                    raise _ToolInputError("keyword must be a non-empty string.")
                 level = str(action_input.get("level", "")).strip().upper()
-                top_k = int(action_input.get("top_k", 5) or 5)
+                top_k = _bounded_int(action_input, "top_k", default=5, minimum=1, maximum=50)
                 logs = ctx.get("logs", [])
                 matches = []
                 for log in logs:
@@ -473,17 +616,24 @@ class ReActAgent:
                     if level and log_level.upper() != level:
                         continue
                     matches.append(log)
+                # F06：匹配日志按 log id 去重后进入最终证据（可回溯来源）
+                known_ids = {getattr(log, "id", None) for log in ctx.get("keyword_matches", [])}
+                ctx.setdefault("keyword_matches", []).extend(
+                    log for log in matches if getattr(log, "id", None) not in known_ids
+                )
                 ctx.setdefault("investigation_notes", []).append(
-                    f"Keyword search `{keyword}` matched {len(matches)} logs."
+                    f"Keyword search `{keyword}` matched {len(matches)} logs "
+                    f"(ids: {[getattr(log, 'id', None) for log in matches[:top_k]]})."
                 )
                 preview = "; ".join(getattr(log, "message", "") for log in matches[:top_k])
                 return (
                     f"Keyword `{keyword}` matched {len(matches)} logs"
-                    + (f": {preview}" if preview else ".")
+                    + (f": {preview}" if preview else "."),
+                    True,
                 )
 
             elif action_name == "summarize_timeline":
-                limit = int(action_input.get("limit", 8) or 8)
+                limit = _bounded_int(action_input, "limit", default=8, minimum=1, maximum=50)
                 logs = ctx.get("logs", [])
                 selected = logs[:limit]
                 timeline = [
@@ -492,7 +642,7 @@ class ReActAgent:
                 ]
                 note = f"Timeline built with {len(selected)} of {len(logs)} logs."
                 ctx.setdefault("investigation_notes", []).append(note)
-                return note + (" " + " | ".join(timeline) if timeline else "")
+                return note + (" " + " | ".join(timeline) if timeline else ""), True
 
             elif action_name == "compare_log_level_trend":
                 logs = ctx.get("logs", [])
@@ -510,7 +660,7 @@ class ReActAgent:
                     f"second_counts={second_counts}."
                 )
                 ctx.setdefault("investigation_notes", []).append(observation)
-                return observation
+                return observation, True
 
             elif action_name == "inspect_dependency_signals":
                 dependency_terms = [
@@ -532,22 +682,27 @@ class ReActAgent:
                     if counts else "No known dependency signals found in logs."
                 )
                 ctx.setdefault("investigation_notes", []).append(observation)
-                return observation
+                return observation, True
 
             elif action_name == "retrieve_similar_incidents":
                 query = action_input.get("query") or build_retrieval_query(
                     incident_title, service_name, ctx
                 )
-                incidents = retrieve_similar_incidents_fn(query, action_input.get("top_k", 3))
+                top_k = _bounded_int(action_input, "top_k", default=3, minimum=1, maximum=20)
+                incidents = retrieve_similar_incidents_fn(
+                    query, top_k, issue_type=ctx.get("issue_type")
+                )
                 ctx["similar_incidents"] = incidents
                 titles = [inc.title for inc in incidents]
-                return f"Retrieved {len(incidents)} similar incidents: {', '.join(titles) or 'none'}."
+                return f"Retrieved {len(incidents)} similar incidents: {', '.join(titles) or 'none'}.", True
 
             else:
-                return f"Unknown tool: {action_name}"
+                return f"Unknown tool: {action_name}", False
 
+        except _ToolInputError as exc:
+            return f"Tool {action_name} rejected invalid input: {exc}", False
         except Exception as exc:
-            return f"Tool {action_name} failed: {exc}"
+            return f"Tool {action_name} failed: {exc}", False
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +730,29 @@ def build_retrieval_query(
         ]
         if part
     )
+
+
+def _bounded_int(
+    action_input: dict[str, Any],
+    key: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """强类型参数限额（F05）：非整数或超界都报 _ToolInputError。"""
+    raw = action_input.get(key, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise _ToolInputError(
+            f"{key} must be an integer between {minimum} and {maximum}, got {raw!r}."
+        ) from None
+    if not (minimum <= value <= maximum):
+        raise _ToolInputError(
+            f"{key} must be between {minimum} and {maximum}, got {value}."
+        )
+    return value
 
 
 def _level_counts(logs: list[LogEntry]) -> dict[str, int]:
