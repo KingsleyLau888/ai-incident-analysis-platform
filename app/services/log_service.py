@@ -16,10 +16,17 @@ def create_log_entry(db: Session, log_in: LogEntryCreate) -> LogEntry:
     return log_entry
 
 
-def list_log_entries(db: Session, service_id: int | None = None) -> list[LogEntry]:
+def list_log_entries(
+    db: Session, service_id: int | None = None, limit: int | None = None
+) -> list[LogEntry]:
     statement = select(LogEntry)
     if service_id is not None:
         statement = statement.where(LogEntry.service_id == service_id)
+    if limit is not None:
+        # 只取最新 limit 条：按 id 倒序取前 limit 再翻回升序，与旧版 [-limit:] 同序（F14）
+        return list(
+            reversed(db.scalars(statement.order_by(LogEntry.id.desc()).limit(limit)).all())
+        )
     return list(db.scalars(statement.order_by(LogEntry.id)).all())
 
 

@@ -13,10 +13,17 @@ def create_incident(db: Session, incident_in: IncidentCreate) -> Incident:
     return incident
 
 
-def list_incidents(db: Session, service_id: int | None = None) -> list[Incident]:
+def list_incidents(
+    db: Session, service_id: int | None = None, limit: int | None = None
+) -> list[Incident]:
     statement = select(Incident)
     if service_id is not None:
         statement = statement.where(Incident.service_id == service_id)
+    if limit is not None:
+        # 只取最新 limit 条：按 id 倒序取前 limit 再翻回升序，与旧版 [-limit:] 同序（F14）
+        return list(
+            reversed(db.scalars(statement.order_by(Incident.id.desc()).limit(limit)).all())
+        )
     return list(db.scalars(statement.order_by(Incident.id)).all())
 
 
