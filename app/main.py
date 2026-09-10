@@ -4,7 +4,11 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.database import Base, engine
-from app.database_migrations import ensure_analysis_result_columns
+from app.database_migrations import (
+    ensure_active_job_unique_index,
+    ensure_analysis_result_columns,
+    ensure_incident_dedupe_columns,
+)
 from app.models import base
 from app.services import analysis_job_service
 
@@ -21,6 +25,8 @@ async def lifespan(_app: FastAPI):
 def create_app() -> FastAPI:
     Base.metadata.create_all(bind=engine)
     ensure_analysis_result_columns(engine)
+    ensure_incident_dedupe_columns(engine)
+    ensure_active_job_unique_index(engine)
 
     app = FastAPI(
         title="AI-Powered Incident Analysis Platform",

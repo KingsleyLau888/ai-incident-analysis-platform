@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session
 
+from app.models.analysis import AnalysisRun
 from app.models.analysis_job import AnalysisJob
 from app.services import analysis_service, incident_service
 
@@ -58,38 +60,61 @@ def _try_claim(db: Session, job_id: int) -> AnalysisJob | None:
 
 
 def run_job(bind: Engine, job_id: int) -> None:
+    """后台执行入口：独立会话领取并执行（fire-and-forget）。"""
     with Session(bind=bind) as db:
-        job = _try_claim(db, job_id)
-        if job is None:
-            # 没领到：任务不存在 / 正被别的执行者处理 / 已完成。
-            # 成功任务重入不重跑，已有结果保持不变（幂等，F02）。
-            return
+        execute_job(db, job_id)
 
-        incident = incident_service.get_incident(db, job.incident_id)
-        if incident is None:
-            _fail(db, job, "Incident not found.")
-            return
 
-        try:
-            # 初始进度也在保护伞内：提交失败会记 failed，而不是永远卡 running（F02）
-            _set_progress(db, job, "loading_incident", "Loading incident context.")
-            analysis = analysis_service.analyze_incident(
-                db,
-                incident,
-                progress_callback=lambda step, detail: _update_by_id(db, job.id, step, detail),
-            )
-            job = get_job(db, job.id)
-            job.analysis_run_id = analysis.id
-            job.status = "succeeded"
-            job.current_step = "completed"
-            job.detail = "Analysis completed and persisted."
-            job.completed_at = datetime.now(UTC)
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            job = get_job(db, job_id)
-            if job is not None:
-                _fail(db, job, str(exc))
+def execute_job(
+    db: Session,
+    job_id: int,
+    extra_progress_callback: Callable[[str, str], None] | None = None,
+) -> AnalysisRun | None:
+    """在当前会话内领取并执行任务（F03 统一入口：后台、手动、流式共用）。
+
+    领取是原子条件更新，并发执行者只有一个赢家；成功任务重入不重跑（F02）。
+    失败时任务标 failed 并返回 None，异常不外抛（任务状态可追踪）。
+    """
+    job = _try_claim(db, job_id)
+    if job is None:
+        # 没领到：任务不存在 / 正被别的执行者处理 / 已完成（F02）
+        return None
+    try:
+        return _execute_job(db, job, extra_progress_callback)
+    except Exception as exc:
+        db.rollback()
+        job = get_job(db, job_id)
+        if job is not None:
+            _fail(db, job, str(exc))
+        return None
+
+
+def _execute_job(
+    db: Session,
+    job: AnalysisJob,
+    extra_progress_callback: Callable[[str, str], None] | None = None,
+) -> AnalysisRun:
+    """执行已领取任务的分析并落库：进度同时更新任务与可选外部回调（F03）。"""
+    incident = incident_service.get_incident(db, job.incident_id)
+    if incident is None:
+        raise RuntimeError("Incident not found.")
+
+    def progress(step: str, detail: str) -> None:
+        _update_by_id(db, job.id, step, detail)
+        if extra_progress_callback is not None:
+            extra_progress_callback(step, detail)
+
+    # 初始进度也在保护伞内：提交失败会记 failed，而不是永远卡 running（F02）
+    _set_progress(db, job, "loading_incident", "Loading incident context.")
+    analysis = analysis_service.analyze_incident(db, incident, progress_callback=progress)
+    job = get_job(db, job.id)
+    job.analysis_run_id = analysis.id
+    job.status = "succeeded"
+    job.current_step = "completed"
+    job.detail = "Analysis completed and persisted."
+    job.completed_at = datetime.now(UTC)
+    db.commit()
+    return analysis
 
 
 def _update_by_id(db: Session, job_id: int, step: str, detail: str) -> None:

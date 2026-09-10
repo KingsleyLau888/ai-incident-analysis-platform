@@ -148,8 +148,10 @@ def test_recover_interrupted_jobs_requeues_pending_and_fails_running(job_engine)
         pending = analysis_job_service.create_job(db, incident.id, trigger="automatic")
         pending_id = pending.id
 
+        # running 任务放在独立事故上：每事故最多一个未完成任务（F03 唯一索引）
+        other_incident = _make_incident_with_logs(db, "recover-running-svc")
         running = AnalysisJob(
-            incident_id=incident.id, trigger="automatic", status="running"
+            incident_id=other_incident.id, trigger="automatic", status="running"
         )
         db.add(running)
         db.flush()

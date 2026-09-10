@@ -14,6 +14,8 @@ class Incident(Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="open", index=True)
+    # 初步类型（创建时推断）：自动去重不依赖尚未生成的分析结果（F03）
+    inferred_issue_type: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     service: Mapped["Service"] = relationship(back_populates="incidents")

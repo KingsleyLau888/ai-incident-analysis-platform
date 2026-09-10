@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -8,6 +8,15 @@ from app.database import Base
 
 class AnalysisJob(Base):
     __tablename__ = "analysis_jobs"
+    # 每事故最多一个未完成任务：关闭并发先查后建的竞态窗口（F03）
+    __table_args__ = (
+        Index(
+            "uq_active_job_per_incident",
+            "incident_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending','running')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     incident_id: Mapped[int] = mapped_column(ForeignKey("incidents.id"), index=True)

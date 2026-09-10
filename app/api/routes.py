@@ -9,6 +9,7 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
@@ -118,7 +119,14 @@ async def platform_events():
 
 @router.post("/services", response_model=ServiceRead, status_code=status.HTTP_201_CREATED)
 def create_service(service_in: ServiceCreate, db: Session = Depends(get_db)):
-    return service_service.create_service(db, service_in)
+    try:
+        return service_service.create_service(db, service_in)
+    except IntegrityError:
+        # 同名（含并发）注册：明确 409，而不是 500（F03）
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Service name already exists"
+        )
 
 
 @router.get("/services", response_model=list[ServiceRead])
@@ -169,10 +177,27 @@ def ingest_external_log(
         None,
     )
     if service is None:
-        service = service_service.create_service(
-            db,
-            ServiceCreate(name=log_in.service_name, description="Automatically registered"),
-        )
+        try:
+            service = service_service.create_service(
+                db,
+                ServiceCreate(name=log_in.service_name, description="Automatically registered"),
+            )
+        except IntegrityError:
+            # 并发注册同名服务：回滚后归到已存在的服务（F03）
+            db.rollback()
+            service = next(
+                (
+                    item
+                    for item in service_service.list_services(db)
+                    if item.name == log_in.service_name
+                ),
+                None,
+            )
+            if service is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Service registration conflict, retry later",
+                )
     log_entry = log_service.create_log_entry(
         db,
         LogEntryCreate(
@@ -240,7 +265,17 @@ def create_analysis_job(
     # 已完成的任务不拦——再次触发视为有意重分析，会新建任务。
     job = analysis_job_service.find_active_job(db, incident_id)
     if job is None:
-        job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+        try:
+            job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+        except IntegrityError:
+            # 并发先查后建竞态：唯一索引兜底，回滚后取已有活动任务（F03）
+            db.rollback()
+            job = analysis_job_service.find_active_job(db, incident_id)
+            if job is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="An analysis job is already active for this incident",
+                )
     # 对复用任务补一次执行是安全的：领取是原子条件更新，重复触发不产生重复结果
     background_tasks.add_task(analysis_job_service.run_job, db.get_bind(), job.id)
     return job
@@ -276,7 +311,24 @@ def analyze_incident(incident_id: int, db: Session = Depends(get_db)):
     incident = incident_service.get_incident(db, incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
-    return analysis_service.analyze_incident(db, incident)
+    # 手动分析也建任务（F03）：任务列表完整、Dashboard 经 job 感知新结果
+    try:
+        job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+    except IntegrityError:
+        # 每事故同时最多一个未完成任务（唯一索引）：冲突时明确 409
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An analysis job is already active for this incident",
+        )
+    analysis = analysis_job_service.execute_job(db, job.id)
+    if analysis is None:
+        job = analysis_job_service.get_job(db, job.id)
+        detail = (job.error if job is not None else "Analysis failed.")[:500]
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Analysis failed: {detail}"
+        )
+    return analysis
 
 
 @router.post("/incidents/{incident_id}/analyze/stream")
@@ -286,26 +338,41 @@ async def analyze_incident_stream(incident_id: int, db: Session = Depends(get_db
     分析在工作线程运行（不阻塞事件循环）；progress_callback 的每一步
     经线程安全队列变成实时 progress 事件；诊断文本在完成后一次性发送
     并标注 simulated（本系统无真实 token 流，不伪装逐字生成）（F14）。
+    手动流式分析也建任务并走统一执行入口：任务状态与流一致，失败时
+    任务标 failed 并如实发 error 事件后结束，不半路断流（F03）。
     """
     if incident_service.get_incident(db, incident_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
     # 释放 404 检查事务：工作线程在同一连接上另行开事务（单连接池场景下避免嵌套）
     db.rollback()
 
+    try:
+        job = analysis_job_service.create_job(db, incident_id, trigger="manual")
+    except IntegrityError:
+        # 每事故同时最多一个未完成任务（唯一索引）：冲突时明确 409
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An analysis job is already active for this incident",
+        )
+    job_id = job.id
+
     loop = asyncio.get_running_loop()
     progress_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
     def run_analysis_in_thread() -> dict:
-        """工作线程：独立会话跑完整分析（与 run_job 同一执行器），进度经队列回传。"""
+        """工作线程：独立会话经统一入口执行任务，进度经队列回传。"""
         with Session(bind=db.get_bind()) as worker_db:
-            incident = incident_service.get_incident(worker_db, incident_id)
-            analysis = analysis_service.analyze_incident(
+            analysis = analysis_job_service.execute_job(
                 worker_db,
-                incident,
-                progress_callback=lambda step, detail: loop.call_soon_threadsafe(
+                job_id,
+                extra_progress_callback=lambda step, detail: loop.call_soon_threadsafe(
                     progress_queue.put_nowait, (step, detail)
                 ),
             )
+            if analysis is None:
+                job = analysis_job_service.get_job(worker_db, job_id)
+                return {"error": job.error if job is not None else "Analysis failed."}
             return {
                 "analysis_id": analysis.id,
                 "issue_type": analysis.issue_type,
@@ -370,6 +437,10 @@ async def analyze_incident_stream(incident_id: int, db: Session = Depends(get_db
                     await asyncio.gather(get_task, return_exceptions=True)
 
             result = analysis_task.result()
+            if "error" in result:
+                # 任务已标 failed：如实发 error 事件后结束，不半路断流（F03）
+                yield _sse_event("error", {"message": result["error"]})
+                return
 
             # 2. 诊断摘要（一次发送；无真实 token 流，如实标注 simulated）
             yield _sse_event(

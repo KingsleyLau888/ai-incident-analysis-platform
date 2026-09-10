@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.analysis import AnalysisRun
 from app.models.incident import Incident
 from app.models.log_entry import LogEntry
 from app.rule_engine.detector import detect_issue
@@ -85,13 +84,9 @@ def find_recent_open_incident(
     if issue_type is None:
         return incidents[0] if incidents else None
 
+    # 匹配创建时保存的初步类型，不依赖尚未生成的分析结果（F03）
     for incident in incidents:
-        latest_analysis = db.scalars(
-            select(AnalysisRun)
-            .where(AnalysisRun.incident_id == incident.id)
-            .order_by(AnalysisRun.id.desc())
-        ).first()
-        if latest_analysis is not None and latest_analysis.issue_type == issue_type:
+        if incident.inferred_issue_type == issue_type:
             return incident
     return None
 
