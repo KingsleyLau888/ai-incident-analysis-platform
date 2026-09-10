@@ -36,6 +36,7 @@ if LOG_FORWARDING_ENABLED:
         platform_url=os.getenv("INCIDENT_API_URL", "http://127.0.0.1:8000"),
         service_name=SERVICE_NAME,
         timeout=10.0,
+        async_mode=False,  # F18：Demo 保持同步即时发送（历史行为）
     )
     platform_handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(platform_handler)

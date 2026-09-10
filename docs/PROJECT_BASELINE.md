@@ -10,10 +10,10 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed）、F03（事故去重依赖初步类型、事故任务原子提交、并发单建锁+唯一索引、手动分析建任务、服务重名稳定返回，115 passed）、F04（时间账本：入账统一 UTC（实测旧代码 +08:00 偏 8 小时）、计数窗口补上界、received_at 送达时间、source 出身代替标题、手动分析窗口封顶，129 passed）、F16（可选接入钥匙门锁 + 请求大小/写入频率限额 + 凭据不泄漏，140 passed）、F15 收尾（SQLite 外键检查开启：运行库体检 9 类孤儿全 0，147 passed）、F05（Agent 取证门禁：成功状态记录 + 诊断前置校验 + 未知动作报决策错误 + 参数限额 + insufficient_evidence）与 F06（检索查询透传 + 证据分型溯源 + 笔记不冒充日志，159 passed）。**P0 全部收工（A 路线 + Agent 门禁 + 共享部署安全边界）** |
-| 当前阶段 | 主链路功能已存在，正确性与可信度收敛阶段（P0 完成） |
-| 建议下一项 | F17（配置治理）/F18（日志接入缓冲）等 P1 事项；进行中 |
-| 随后处理 | F10/F12 真实模型评测剩余指标（需真实 API）；F13/F14 浏览器实测（需用户配合） |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed）、F03（事故去重依赖初步类型、事故任务原子提交、并发单建锁+唯一索引、手动分析建任务、服务重名稳定返回，115 passed）、F04（时间账本：入账统一 UTC（实测旧代码 +08:00 偏 8 小时）、计数窗口补上界、received_at 送达时间、source 出身代替标题、手动分析窗口封顶，129 passed）、F16（可选接入钥匙门锁 + 请求大小/写入频率限额 + 凭据不泄漏，140 passed）、F15 收尾（SQLite 外键检查开启：运行库体检 9 类孤儿全 0，147 passed）、F05（Agent 取证门禁：成功状态记录 + 诊断前置校验 + 未知动作报决策错误 + 参数限额 + insufficient_evidence）与 F06（检索查询透传 + 证据分型溯源 + 笔记不冒充日志，159 passed）、F17（统一配置校验 + .env 显式加载 + 坏配置快速报错 + 依赖分组文档，167 passed）、F18（日志接入异步有界缓冲 + 连接复用 + 丢弃可观测 + 原始事件时间，175 passed）。**P0/P1 可自主完成项全部收工** |
+| 当前阶段 | 主链路功能已存在，正确性与可信度收敛阶段（P0+P1 自主项完成） |
+| 建议下一项 | 无代码待办（自主范围内）；用户可选：F10/F12 真实模型评测（需真实 API）或 F13/F14 浏览器实测（需用户配合） |
+| 随后处理 | 真实接入时再评估：F18 压力场景实测、多进程限流外部存储、CrossEncoder 模型下载决策 |
 | 随后处理 | F16：真实数据/共享部署前安全边界 |
 | 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
 | 暂缓 | 新 Agent 框架、更多检索后端、多 Agent 协作、自动修复、大规模前端重写 |
@@ -273,13 +273,16 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - 实测：用户 .env 现真正生效（DATABASE_URL=incident-live.db、LLM_PROVIDER=openai_compatible）；该库已提前完成全部迁移（37 日志 received_at 回填、4 事故 source 全 automatic、类型回填 4/4、唯一索引安全创建、孤儿全 0）——下次普通启动即为迁移后状态。
 - 验收：新增 tests/test_f17_config_governance.py 8 项（默认合法、枚举/整数/浮点报错、openai_compatible 三件套、密钥不回显、坏配置 RuntimeError、.env 加载不覆盖已有变量）；全套 167 passed；旧代码反向验证：模块不存在收集失败（旧代码无此功能）；真实服务冒烟（坏配置启动即报清晰错误、好配置临时库启动 200 且 mock/tfidf 生效）。
 
-### F18 · P2：日志接入会等待网络
+### F18 · P2：日志接入会等待网络 — **已修复（2026-09-10）**
 
-- 证据：`integrations/python_logging_handler.py:37` 每条日志同步新建 HTTP client，默认 timeout=2 秒，未传 record.created 原始时间。
-- 后果：故障时业务线程等待上报；反复连接增加成本，发生时间变成接收时间。**代码确认，压力场景待测。**
-- 修改：真实接入需要有界队列、批处理/连接复用、丢弃统计、关闭行为和原始事件时间；保持 Demo 轻量。
-- 验收：接收端不可用不把业务拖到秒级；缓冲有界、丢弃可观测。
-- 工作量中；收益中，真实接入时升级优先级。
+- 证据（历史）：`integrations/python_logging_handler.py:37` 每条日志同步新建 HTTP client，默认 timeout=2 秒，未传 record.created 原始时间。
+- 修改（已实施）：
+  - `IncidentPlatformHandler` 默认异步批处理：`emit()` 只入有界队列（满则丢弃并计数，绝不阻塞业务线程）；后台单线程用复用连接发送（批次上限 + 刷新间隔）；`close()` 置停止事件、排空队列后退出（有界等待）；
+  - 发送体带 `timestamp` = record.created 原始发生时间（与 F04 的 received_at 送达时间区分）；
+  - `stats()` 观测：queued/sent/dropped/last_error（丢弃可观测）；
+  - 服务 id 解析移到后台线程并缓存（业务线程零网络调用）；
+  - `async_mode=False` 保留同步旧行为；两个 Demo（demo_automatic_incident、demo_shop_system）显式同步模式（短生命周期/历史行为不变）。
+- 验收：新增 tests/test_f18_logging_handler.py 8 项（MockTransport 注入：慢平台 emit<0.1s 而同步需 0.9s+、原始 timestamp 送达、队列溢出丢弃计数、平台不可用不阻塞且 dropped/last_error 可观测、close 排空 4/4、服务解析一次、同步模式立即送达、同步失败吞掉并计数）；全套 175 passed；旧代码反向验证 8/8 失败。
 
 ## 6. AI 执行链十二层审计
 
@@ -407,6 +410,8 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-10 | 修复接入安全边界（F16，用户批准）：可选接入钥匙（`AUTH_API_KEY` 未设=演示全开放，设置后全接口要求 `X-API-Key`，compare_digest 防时序、401 不泄钥匙）；请求大小上限（Content-Length 快速拒绝 + 实际字节兜底，413）与写入频率限流（每 IP 滑动窗口，429 + Retry-After，读取不计，零值关闭）；`/features` 如实显示门锁/限额状态；README 增"接真实数据前"小节 | 新增 tests/test_f16_auth_and_limits.py 11 项；全套 140 passed；旧代码反向验证 9/11 失败（2 过：演示模式全开放为锁定行为、旧代码全放行使"对钥匙 200"必然通过）；真实服务冒烟（带锁启动：无钥匙 401/对钥匙 200/超包 413/第三次写入 429+retry-after 59/读取不受限/面板无钥匙泄漏，冒烟数据已清理） | F16 标记已修复；**P0 全部收工**；下一步建议 F10/F12 真实模型评测剩余指标或 F15 剩余（SQLite FK pragma） |
 | 2026-09-10 | F15 收尾（用户批准，全程无需用户参与）：`enable_sqlite_foreign_keys` 每连接 `PRAGMA foreign_keys=ON`（应用引擎接入）；`scan_foreign_key_orphans` 体检 9 类外键孤儿（含 feedback 表名核实为 diagnosis_feedback） | 新增 tests/test_f15_foreign_keys.py 7 项（应用引擎 PRAGMA=1、孤儿日志/事故/任务写入被数据库拒绝、合法写入不受影响、体检报数准确含老库孤儿模拟、空库安全）；全套 147 passed；旧代码反向验证 7/7 失败；运行库体检 9 类孤儿全 0；真实服务冒烟（正常写入 201、孤儿写入在服务层 404 拦截、启动无报错，冒烟数据已清理） | F15 全部完成；**P0 全部收工**；下一步建议 F05/F06（Agent 取证前置）或 F17/F18（P1） |
 | 2026-09-10 | F05 + F06（用户授权全自主推进）：F05 Agent 取证门禁（successful_tools 状态记录、generate_diagnosis 前置 search_logs+detect_signals、未知动作报决策错误不再静默转诊断、seen_calls 代码级拒绝重复调用、_bounded_int 参数限额、预算耗尽证据不足返回 insufficient_evidence 并落占位诊断+Trace 标注）；F06 证据来源分型（retrieve_with_query 公开查询检索、_AgentObservationLog 假日志移除、diagnose 全链路新增 investigation_notes 独立字段、关键词命中按 log id 去重并入证据） | 新增 tests/test_f05_agent_safeguards.py 6 项 + tests/test_f06_evidence_sources.py 6 项；全套 159 passed；旧代码反向验证 11/12 失败（1 过：查询回退为旧行为锁定项）；现有 3 项 Agent 端到端测试不受门禁影响 | F05/F06 标记已修复；下一步 F17（配置治理）/F18（日志接入缓冲） |
+| 2026-09-10 | F17（用户授权全自主推进）：`app/config.py` 统一配置清单与启动校验（枚举/布尔/整数/浮点 21 项 + openai_compatible 三件套）；`prepare_config()` 启动加载 runtime/.env → .env（不覆盖已导出变量）+ 坏配置 RuntimeError 快速失败；requirements.txt 分组（基础/可选检索/测试）+ Python 3.11 + venv 版本差异记录；DESIGN Future Work 校正指向基线 | 新增 tests/test_f17_config_governance.py 8 项；全套 167 passed；旧代码反向验证：模块不存在收集失败；真实服务冒烟（坏配置启动即报错、好配置临时库 200）；实测用户 .env 生效（DATABASE_URL=incident-live.db）且该库提前完成全部迁移（37 日志回填、4 事故出身/类型回填、索引安全、孤儿全 0） | F17 标记已修复；下一步 F18 |
+| 2026-09-10 | F18（用户授权全自主推进）：`IncidentPlatformHandler` 默认异步批处理（有界队列 emit 不阻塞、后台单线程复用连接、丢弃计数、close 排空、stats 观测）；发送体带原始 record.created；服务解析移后台并缓存；Demo 显式同步模式保持历史行为 | 新增 tests/test_f18_logging_handler.py 8 项（MockTransport 注入：慢平台 emit<0.1s、原始时间戳、队列溢出丢弃可观测、故障不阻塞、close 排空 4/4、服务解析一次、同步模式保留）；全套 175 passed；旧代码反向验证 8/8 失败 | F18 标记已修复；**P0/P1 自主项全部收工**；剩余均为需用户参与项（F10/F12 真实 API 评测、F13/F14 浏览器实测） |
 
 每次工作更新此模板，不另建竞争性总计划：
 

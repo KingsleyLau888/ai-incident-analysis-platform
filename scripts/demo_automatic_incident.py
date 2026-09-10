@@ -30,6 +30,7 @@ def main() -> None:
     handler = IncidentPlatformHandler(
         platform_url=PLATFORM_URL,
         service_name=SERVICE_NAME,
+        async_mode=False,  # F18：短生命周期脚本保持同步即时发送（Demo 轻量）
     )
     handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
