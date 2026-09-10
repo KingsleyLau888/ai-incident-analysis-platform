@@ -533,17 +533,18 @@ The MVP should use a controlled pipeline rather than a fully autonomous agent.
 
 ## 12. Future Work
 
+> 状态更新（2026-09-10，F17）：以下条目部分早已实现。向量检索（TF-IDF/dense/Chroma
+> 多后端）、异步分析任务（analysis_jobs + 后台执行 + SSE 进度）与人工反馈接口均已存在；
+> 事故时间线与部分告警聚合能力也已具备。当前能力边界、待办与验收以
+> [项目基线](docs/PROJECT_BASELINE.md) 为准，本清单仅保留尚未落地的方向。
+
 Future work may include:
 
 - Metrics ingestion
 - Alert ingestion
 - Deployment event correlation
 - Service dependency graph
-- Vector search for runbooks and historical incidents
-- Async analysis jobs
-- Human feedback loop
 - Better eval datasets
-- Incident timeline generation
 - Slack or PagerDuty integrations
 - Multi-incident pattern analysis
 

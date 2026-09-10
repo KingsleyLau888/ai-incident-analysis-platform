@@ -262,12 +262,16 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：新增 tests/test_f16_auth_and_limits.py 11 项（未设钥匙全开放、无/错钥匙 401、对钥匙 200、401/429 不回显钥匙、面板如实显示不泄钥匙、413 大小上限、429 频率上限 + Retry-After、读取不占额度、零值关闭限流）。全套 140 passed；旧代码反向验证 9/11 失败（2 过：演示模式全开放为锁定行为、旧代码全放行导致"对钥匙 200"必然通过，均记录）；真实服务冒烟通过（带锁启动：无钥匙 401、对钥匙 200、600 字节包对 300 限额 413、第三次写入 429 + retry-after 59、读取不受限、面板无钥匙泄漏，冒烟数据已清理）。
 - 遗留/边界：单把钥匙不分角色（多租户/RBAC 明确不做，基线原则）；限流状态在进程内存（重启清零、多 worker 各算各的）；不信任 X-Forwarded-For；被 413/401 拒绝的写入尝试同样计入频率额度（防刷按设计）；未做公网部署或攻击验证。
 
-### F17 · P2：配置、依赖与文档状态分散
+### F17 · P2：配置、依赖与文档状态分散 — **已修复（2026-09-10）**
 
-- 证据：各模块散读环境变量，有些导入时固定；默认依赖含重型检索包且部分开放下界；README 建议 `.env` 但普通命令不加载它，应用无 dotenv 调用；DESIGN 把已有异步任务、向量检索和反馈列为 Future Work。
-- 修改：小型统一配置校验，区分启动/请求配置；记录 Python 与可复现依赖，基础/可选依赖分组；明确配置加载；历史文档指向本基线。
-- 验收：新环境可运行 Mock/TF-IDF，坏配置明确报错；不打印密钥，不借此自动升级全部包。
-- 工作量中；收益中（减少启动差异）。本轮只补了文档入口，完整配置治理未做。
+- 证据（历史）：各模块散读环境变量，有些导入时固定；默认依赖含重型检索包且部分开放下界；README 建议 `.env` 但普通命令不加载它，应用无 dotenv 调用；DESIGN 把已有异步任务、向量检索和反馈列为 Future Work。
+- 修改（已实施）：
+  - `app/config.py` 统一配置清单与校验：枚举（LLM_PROVIDER/RETRIEVAL_MODE/CHUNKING_STRATEGY/ANALYSIS_MODE/RUNBOOK_FILTER_MODE）、布尔、整数/浮点范围三类共 21 项；`LLM_PROVIDER=openai_compatible` 时校验三件套（LLM_API_KEY/LLM_BASE_URL/LLM_MODEL）齐全；错误信息只点名变量，不回显密钥值；
+  - `.env` 显式加载（python-dotenv 加入 requirements）：`prepare_config()` 在 create_app 启动时加载 runtime/.env → .env（不覆盖已导出变量），坏配置 RuntimeError 快速失败，不再静默回退 mock；
+  - 检测阈值等请求配置仍按请求热读（行为不变，README 注明）；
+  - requirements.txt 分组注释（基础/可选检索/测试）+ Python 3.11 记录 + venv 版本差异说明（sentence-transformers 3.3.1 vs venv 5.5.1、chromadb >=1.0.0 vs venv 1.5.9，本轮不升级不重钉）；DESIGN Future Work 校正（向量检索/异步任务/反馈已存在，指向基线）；
+  - 实测：用户 .env 现真正生效（DATABASE_URL=incident-live.db、LLM_PROVIDER=openai_compatible）；该库已提前完成全部迁移（37 日志 received_at 回填、4 事故 source 全 automatic、类型回填 4/4、唯一索引安全创建、孤儿全 0）——下次普通启动即为迁移后状态。
+- 验收：新增 tests/test_f17_config_governance.py 8 项（默认合法、枚举/整数/浮点报错、openai_compatible 三件套、密钥不回显、坏配置 RuntimeError、.env 加载不覆盖已有变量）；全套 167 passed；旧代码反向验证：模块不存在收集失败（旧代码无此功能）；真实服务冒烟（坏配置启动即报清晰错误、好配置临时库启动 200 且 mock/tfidf 生效）。
 
 ### F18 · P2：日志接入会等待网络
 

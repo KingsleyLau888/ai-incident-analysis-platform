@@ -106,6 +106,13 @@ $env:WRITE_RATE_LIMIT_PER_MINUTE = "600"       # 可选：每 IP 每分钟写入
 
 调用方（脚本/采集器）带上 `X-API-Key` 头即可。限流状态在进程内存中（重启清零、多进程各算各的），只覆盖单进程部署。
 
+### 配置加载与校验（F17）
+
+- 启动时自动加载 `.env`：优先 `runtime/.env`，其次项目根 `.env`；**已导出的环境变量永远优先于 .env 文件**。
+- 启动时校验关键配置，坏配置直接报错退出（错误信息只点名变量，不输出密钥值）：`LLM_PROVIDER`、`RETRIEVAL_MODE`、`CHUNKING_STRATEGY`、`ANALYSIS_MODE`、`RUNBOOK_FILTER_MODE` 等枚举；各类阈值/限额的整数范围；`LLM_PROVIDER=openai_compatible` 时要求 `LLM_API_KEY`/`LLM_BASE_URL`/`LLM_MODEL` 三件套齐全。
+- 检测阈值（`AUTO_INCIDENT_ERROR_THRESHOLD` 等）仍按请求热读，改动无需重启。
+- 依赖分组见 `requirements.txt` 注释：基础组即可跑通 Mock + TF-IDF。
+
 ## Demo Shop
 
 终端 1，启动 Incident Copilot：

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.database import Base, engine
+from app.config import prepare_config
 from app.database_migrations import (
     ensure_active_job_unique_index,
     ensure_analysis_result_columns,
@@ -26,6 +27,8 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # F17：启动即校验配置（.env 加载 + 非法取值报错，不静默回退）
+    prepare_config()
     Base.metadata.create_all(bind=engine)
     ensure_analysis_result_columns(engine)
     ensure_incident_dedupe_columns(engine)

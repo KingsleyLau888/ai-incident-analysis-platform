@@ -1,10 +1,23 @@
+# 依赖分组（F17）：基础组保证 Mock + TF-IDF 完整可用；
+# 可选组仅在启用对应检索后端/评测时被导入。Python 3.11（开发环境 3.11.6）实测。
+#
+# 已知差异（F17 记录，本轮不升级）：开发 venv 中 sentence-transformers 实际为 5.5.1
+# （离线可用 all-MiniLM-L6-v2），与本文件钉住的 3.3.1 不同；chromadb 实际 1.5.9。
+# 可复现安装以本文件为准，若追求与开发环境一致请另行冻结（pip freeze）。
+
+# ── 基础 ──────────────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy==2.0.36
 pydantic==2.10.4
-pytest==8.3.4
 httpx==0.28.1
-sentence-transformers==3.3.1
-chromadb>=1.0.0
 jinja2>=3.0
 aiofiles>=24.0
+python-dotenv>=1.0
+
+# ── 可选：检索后端（TF-IDF 不需要；sentence-transformers/chromadb 供 dense 后端） ──
+sentence-transformers==3.3.1
+chromadb>=1.0.0
+
+# ── 测试 ──────────────────────────────────────────────
+pytest==8.3.4
