@@ -201,3 +201,66 @@ def ensure_incident_source_column(engine: Engine) -> dict[str, int]:
             )
         )
     return {"added_column": added_column}
+
+
+# 外键体检（F15 收尾）：检查名 → (涉及的表, 孤儿计数 SQL)。
+# 只统计已存在的表；孤儿数据本身不删除，先报告由人决定。
+_ORPHAN_CHECKS: dict[str, tuple[set[str], str]] = {
+    "log_entries_without_service": (
+        {"log_entries", "services"},
+        "SELECT COUNT(*) FROM log_entries l LEFT JOIN services s ON s.id = l.service_id "
+        "WHERE s.id IS NULL",
+    ),
+    "incidents_without_service": (
+        {"incidents", "services"},
+        "SELECT COUNT(*) FROM incidents i LEFT JOIN services s ON s.id = i.service_id "
+        "WHERE s.id IS NULL",
+    ),
+    "analysis_runs_without_incident": (
+        {"analysis_runs", "incidents"},
+        "SELECT COUNT(*) FROM analysis_runs r LEFT JOIN incidents i ON i.id = r.incident_id "
+        "WHERE i.id IS NULL",
+    ),
+    "analysis_jobs_without_incident": (
+        {"analysis_jobs", "incidents"},
+        "SELECT COUNT(*) FROM analysis_jobs j LEFT JOIN incidents i ON i.id = j.incident_id "
+        "WHERE i.id IS NULL",
+    ),
+    "analysis_jobs_without_run": (
+        {"analysis_jobs", "analysis_runs"},
+        "SELECT COUNT(*) FROM analysis_jobs j LEFT JOIN analysis_runs r ON r.id = j.analysis_run_id "
+        "WHERE j.analysis_run_id IS NOT NULL AND r.id IS NULL",
+    ),
+    "analysis_traces_without_run": (
+        {"analysis_traces", "analysis_runs"},
+        "SELECT COUNT(*) FROM analysis_traces t LEFT JOIN analysis_runs r ON r.id = t.analysis_run_id "
+        "WHERE r.id IS NULL",
+    ),
+    "incident_evidence_without_run": (
+        {"incident_evidence", "analysis_runs"},
+        "SELECT COUNT(*) FROM incident_evidence e LEFT JOIN analysis_runs r ON r.id = e.analysis_run_id "
+        "WHERE r.id IS NULL",
+    ),
+    "incident_evidence_without_log": (
+        {"incident_evidence", "log_entries"},
+        "SELECT COUNT(*) FROM incident_evidence e LEFT JOIN log_entries l ON l.id = e.log_entry_id "
+        "WHERE l.id IS NULL",
+    ),
+    "feedback_without_run": (
+        {"diagnosis_feedback", "analysis_runs"},
+        "SELECT COUNT(*) FROM diagnosis_feedback f LEFT JOIN analysis_runs r ON r.id = f.analysis_run_id "
+        "WHERE r.id IS NULL",
+    ),
+}
+
+
+def scan_foreign_key_orphans(engine: Engine) -> dict[str, int]:
+    """体检每类外键的孤儿行数：开启外键检查前先报告，不擅自删除数据。"""
+    tables = set(inspect(engine).get_table_names())
+    result: dict[str, int] = {}
+    with engine.connect() as connection:
+        for name, (required_tables, statement) in _ORPHAN_CHECKS.items():
+            if not required_tables.issubset(tables):
+                continue
+            result[name] = connection.execute(text(statement)).scalar() or 0
+    return result
