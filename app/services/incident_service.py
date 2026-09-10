@@ -6,7 +6,10 @@ from app.schemas.incident import IncidentCreate
 
 
 def create_incident(db: Session, incident_in: IncidentCreate) -> Incident:
-    incident = Incident(**incident_in.model_dump())
+    # 出身字段（F04）：人工接口创建的一律 manual，客户端不可伪造出身
+    data = incident_in.model_dump()
+    data["source"] = "manual"
+    incident = Incident(**data)
     db.add(incident)
     db.commit()
     db.refresh(incident)

@@ -8,6 +8,8 @@ from app.database_migrations import (
     ensure_active_job_unique_index,
     ensure_analysis_result_columns,
     ensure_incident_dedupe_columns,
+    ensure_incident_source_column,
+    ensure_log_time_columns,
 )
 from app.models import base
 from app.services import analysis_job_service
@@ -27,6 +29,8 @@ def create_app() -> FastAPI:
     ensure_analysis_result_columns(engine)
     ensure_incident_dedupe_columns(engine)
     ensure_active_job_unique_index(engine)
+    ensure_log_time_columns(engine)
+    ensure_incident_source_column(engine)
 
     app = FastAPI(
         title="AI-Powered Incident Analysis Platform",

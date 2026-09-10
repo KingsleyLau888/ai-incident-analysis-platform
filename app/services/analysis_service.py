@@ -128,13 +128,15 @@ def _log_window_start(
 
 
 def _log_window_end(incident: Incident, incident_time):
-    if not _is_automatic_incident(incident):
-        return None
+    # F04：窗口统一以事故创建时刻封顶——自动事故如此，手动事故也如此，
+    # 防止旧手动事故重分析混入创建之后的无关故障（source 为 NULL 的老数据
+    # 由迁移按标题回填，此处 None 按 manual 语义封顶，宁可少取不混入）。
     return incident_time
 
 
 def _is_automatic_incident(incident: Incident) -> bool:
-    return incident.title.startswith("Automatic alert for ")
+    # F04：看出身字段，不再看标题前缀（改标题不再影响窗口语义）
+    return incident.source == "automatic"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

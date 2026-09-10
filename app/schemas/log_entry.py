@@ -31,3 +31,4 @@ class LogEntryRead(BeijingTimeMixin, BaseModel):
     level: str
     message: str
     timestamp: datetime
+    received_at: datetime | None = None

@@ -70,7 +70,10 @@ def create_incident_with_job(
     db: Session, incident_in: IncidentCreate, trigger: str = "automatic"
 ) -> tuple[Incident, AnalysisJob]:
     """事故与任务一次提交（F03）：中途失败两者都不落库，不留孤儿事故。"""
-    incident = Incident(**incident_in.model_dump())
+    data = incident_in.model_dump()
+    # 出身字段（F04）：与任务触发方式一致，分析窗口语义看出身不看标题
+    data["source"] = "automatic" if trigger == "automatic" else "manual"
+    incident = Incident(**data)
     db.add(incident)
     db.flush()
     job = AnalysisJob(incident_id=incident.id, trigger=trigger)

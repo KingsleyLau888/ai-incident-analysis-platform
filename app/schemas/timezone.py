@@ -10,6 +10,7 @@ class BeijingTimeMixin:
     @field_serializer(
         "created_at",
         "timestamp",
+        "received_at",
         "started_at",
         "completed_at",
         when_used="json",

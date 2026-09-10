@@ -48,10 +48,13 @@ def evaluate_error_burst(
     window_start = timestamp - timedelta(seconds=window_seconds)
     if since is not None:
         window_start = max(window_start, _as_utc(since))
+    # 窗口为 [window_start, timestamp]（F04）：补上界，事件时间晚于当前日志的
+    # 记录不回头凑数，晚到/未来日志按各自发生时刻评估，不污染已有决定。
     error_count = db.scalar(
         select(func.count(LogEntry.id)).where(
             LogEntry.service_id == log_entry.service_id,
             LogEntry.timestamp >= window_start,
+            LogEntry.timestamp <= timestamp,
             func.upper(LogEntry.level).in_(["ERROR", "CRITICAL"]),
         )
     ) or 0

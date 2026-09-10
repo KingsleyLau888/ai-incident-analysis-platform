@@ -26,4 +26,5 @@ class IncidentRead(BeijingTimeMixin, BaseModel):
     description: str | None
     status: str
     inferred_issue_type: str | None
+    source: str | None = None
     created_at: datetime
