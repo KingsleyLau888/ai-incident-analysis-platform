@@ -1,11 +1,13 @@
 """统一配置清单、.env 加载与启动校验（F17）。
 
 三层约定：
-- 启动配置：进程启动时由 `prepare_config()`（create_app 调用）加载并校验一次，
-  非法取值启动即报错，不静默回退；错误信息只点名变量，绝不包含密钥值。
+- 启动配置：进程启动时由 `prepare_config()`（app.main 模块级、在任何读取配置的
+  模块导入之前）加载并校验一次，非法取值启动即报错，不静默回退；错误信息只
+  点名变量，绝不包含密钥值。
 - 请求配置：如 AUTO_INCIDENT_*（检测阈值/窗口/去重分钟数）等热调参数，
   仍由各模块按请求读环境变量（保持现有行为），不在启动时校验。
-- 测试隔离：conftest 不调用 prepare_config，测试不受本机 .env 影响。
+- 测试隔离：conftest 不调用 prepare_config、不导入 app.main，测试不受本机
+  .env 影响；R01 的独立子进程探针见 tests/test_f17_config_governance.py。
 
 配置读取本身仍走 os.getenv，本模块只做清单、加载与校验，不引入新读取路径。
 """
@@ -139,7 +141,12 @@ def _llm_missing_parts() -> list[str]:
 
 
 def prepare_config() -> None:
-    """create_app 入口：加载 .env + 校验，坏配置直接 RuntimeError（F17）。"""
+    """启动入口：加载 .env + 校验，坏配置直接 RuntimeError（F17）。
+
+    必须在任何读取配置的模块导入之前调用（app.database 的 engine、
+    embedding_service 的重排开关都在导入时固定），否则 .env 值看似生效、
+    实际早已按默认值固定（2026-09-11 复核 R01）。
+    """
     load_dotenv_config()
     problems = validate_startup_config()
     if problems:

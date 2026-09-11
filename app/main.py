@@ -2,9 +2,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+# F17（2026-09-11 复核 R01）：.env 必须最先加载——app.database 在导入时读取
+# DATABASE_URL 并创建 engine，embedding_service 在导入时固定重排开关；晚于这些
+# 导入调用 prepare_config() 时，配置看似生效、实际早已按默认值固定。
+from app.config import prepare_config
+
+prepare_config()
+
 from app.api.routes import router
 from app.database import Base, engine
-from app.config import prepare_config
 from app.database_migrations import (
     ensure_active_job_unique_index,
     ensure_analysis_result_columns,
@@ -27,8 +33,7 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    # F17：启动即校验配置（.env 加载 + 非法取值报错，不静默回退）
-    prepare_config()
+    # 配置加载与校验已在模块级完成（见文件顶部 F17 注释），此处直接建表/迁移
     Base.metadata.create_all(bind=engine)
     ensure_analysis_result_columns(engine)
     ensure_incident_dedupe_columns(engine)
