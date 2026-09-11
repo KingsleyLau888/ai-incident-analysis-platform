@@ -36,6 +36,17 @@ class JudgeVerdict:
 JUDGE_SYSTEM_PROMPT = """You are an impartial evaluator of AI-generated incident diagnosis reports.
 Your job is to score the diagnosis on four dimensions.  Be strict but fair.
 
+IMPORTANT CONTEXT RULE: The diagnosis model was given TWO kinds of input:
+1. evidence_logs — the raw runtime logs for this incident.
+2. reference_materials — retrieved runbook chunks and similar historical incidents
+   from a knowledge base (this is an open-book exam: these materials were
+   legitimately given to the model as retrieval context).
+Facts drawn from reference_materials are NOT hallucination. A citation of a runbook
+source (e.g. "postgres_primary_unavailable.md") or a historical incident ID (e.g.
+"HIST-TIMEOUT-001") that appears in reference_materials is legitimate grounding.
+Hallucination means inventing facts present in NEITHER evidence_logs NOR
+reference_materials, or citing a reference ID that does not appear in either.
+
 Return ONLY a valid JSON object matching this schema (no markdown fences, no extra text):
 {
   "diagnosis_coherence": <float 0.0-1.0>,
@@ -49,11 +60,12 @@ SCORING GUIDE:
 - diagnosis_coherence: Does the diagnosis logically connect the incident, issue_type, and evidence?
   1.0 = perfectly coherent chain of reasoning; 0.0 = nonsensical or contradictory.
 
-- evidence_grounding: Are the root cause hypotheses anchored to the provided evidence logs?
-  1.0 = every claim cites specific evidence; 0.0 = claims unsupported or fabricated.
+- evidence_grounding: Are the root cause hypotheses anchored to the evidence_logs AND/OR reference_materials?
+  1.0 = every claim cites specific evidence or reference materials; 0.0 = claims unsupported or fabricated.
 
-- hallucination_flag: Does the diagnosis mention services, errors, or facts NOT present in the evidence?
-  true = hallucination or fabrication detected; false = consistent with provided evidence.
+- hallucination_flag: Does the diagnosis mention services, errors, or facts NOT present in the
+  evidence_logs AND NOT present in the reference_materials?
+  true = hallucination or fabrication detected; false = consistent with provided inputs.
 
 - actionability: Are the suggested actions specific and executable?
   1.0 = concrete commands/checks; 0.0 = vague advice like "investigate further".
@@ -70,14 +82,24 @@ def build_judge_user_prompt(
     root_cause_hypotheses: list[dict],
     suggested_actions: list[str],
     impact_scope: str,
+    retrieved_runbook_chunks: list[dict] | None = None,
+    similar_incidents: list[dict] | None = None,
 ) -> str:
-    """Construct the evaluation payload for the judge LLM."""
+    """Construct the evaluation payload for the judge LLM.
+
+    F10/F12：裁判必须拿到与诊断模型相同的开卷资料（检索到的手册 chunk
+    与相似事故），否则会把合法检索引用误判为幻觉。
+    """
     payload: dict[str, Any] = {
         "incident_title": incident_title,
         "service_name": service_name,
         "issue_type": issue_type,
         "severity": severity,
         "evidence_logs": evidence_messages,
+        "reference_materials": {
+            "retrieved_runbook_chunks": retrieved_runbook_chunks or [],
+            "similar_incidents": similar_incidents or [],
+        },
         "diagnosis_to_evaluate": {
             "diagnosis_summary": diagnosis_summary,
             "root_cause_hypotheses": root_cause_hypotheses,
@@ -107,12 +129,19 @@ class MockJudge:
         root_cause_hypotheses: list[dict],
         suggested_actions: list[str],
         impact_scope: str,
+        retrieved_runbook_chunks: list[dict] | None = None,
+        similar_incidents: list[dict] | None = None,
     ) -> JudgeVerdict:
-        # Heuristic scoring — not as nuanced as LLM but better than nothing
+        # Heuristic scoring — not as nuanced as LLM but better than nothing.
+        # F10/F12：启发式判断同样纳入开卷资料（检索手册 + 相似事故），
+        # 只存在于参考资料中的名称不算幻觉。
+        known_text = _known_facts_text(
+            evidence_messages, retrieved_runbook_chunks, similar_incidents
+        )
         coherence = _heuristic_coherence(issue_type, diagnosis_summary)
-        grounding = _heuristic_grounding(evidence_messages, root_cause_hypotheses)
+        grounding = _heuristic_grounding(known_text, root_cause_hypotheses)
         hallucination = _heuristic_hallucination(
-            evidence_messages, diagnosis_summary, root_cause_hypotheses, impact_scope
+            known_text, diagnosis_summary, root_cause_hypotheses, impact_scope
         )
         actionability = _heuristic_actionability(suggested_actions)
         return JudgeVerdict(
@@ -147,6 +176,8 @@ class LLMJudge:
         root_cause_hypotheses: list[dict],
         suggested_actions: list[str],
         impact_scope: str,
+        retrieved_runbook_chunks: list[dict] | None = None,
+        similar_incidents: list[dict] | None = None,
     ) -> JudgeVerdict:
         user_content = build_judge_user_prompt(
             incident_title=incident_title,
@@ -158,6 +189,8 @@ class LLMJudge:
             root_cause_hypotheses=root_cause_hypotheses,
             suggested_actions=list(suggested_actions),
             impact_scope=impact_scope,
+            retrieved_runbook_chunks=retrieved_runbook_chunks,
+            similar_incidents=similar_incidents,
         )
         payload = {
             "model": self.model,
@@ -211,6 +244,29 @@ def get_judge() -> MockJudge | LLMJudge:
 # ---------------------------------------------------------------------------
 
 
+def _known_facts_text(
+    evidence_messages: list[str],
+    retrieved_runbook_chunks: list[dict] | None,
+    similar_incidents: list[dict] | None,
+) -> str:
+    """合并裁判已知的全部材料文本：证据日志 + 检索手册 + 相似事故（F10/F12）。"""
+    parts: list[str] = list(evidence_messages)
+    for chunk in retrieved_runbook_chunks or []:
+        parts.extend(str(value) for value in (chunk.get("source"), chunk.get("title"), chunk.get("content")) if value)
+    for incident in similar_incidents or []:
+        parts.extend(
+            str(value)
+            for value in (
+                incident.get("historical_id"),
+                incident.get("title"),
+                incident.get("root_cause"),
+                incident.get("resolution"),
+            )
+            if value
+        )
+    return " ".join(parts).lower()
+
+
 def _heuristic_coherence(issue_type: str, diagnosis_summary: str) -> float:
     """Check if diagnosis mentions the issue type."""
     score = 0.5
@@ -227,18 +283,17 @@ def _heuristic_coherence(issue_type: str, diagnosis_summary: str) -> float:
 
 
 def _heuristic_grounding(
-    evidence_messages: list[str], root_cause_hypotheses: list[dict]
+    known_text: str, root_cause_hypotheses: list[dict]
 ) -> float:
-    """Check if hypotheses reference evidence keywords."""
-    if not evidence_messages or not root_cause_hypotheses:
+    """Check if hypotheses reference known material keywords (evidence + references)."""
+    if not known_text or not root_cause_hypotheses:
         return 0.3
-    evidence_text = " ".join(evidence_messages).lower()
     grounding_count = 0
     for hypothesis in root_cause_hypotheses:
         supporting = hypothesis.get("supporting_evidence", [])
         for item in supporting:
-            # Check if evidence snippet appears in actual evidence
-            if any(word.lower() in evidence_text for word in item.split()[:3]):
+            # Check if evidence snippet appears in known materials
+            if any(word.lower() in known_text for word in item.split()[:3]):
                 grounding_count += 1
                 break
     if not root_cause_hypotheses:
@@ -248,13 +303,13 @@ def _heuristic_grounding(
 
 
 def _heuristic_hallucination(
-    evidence_messages: list[str],
+    known_text: str,
     diagnosis_summary: str,
     root_cause_hypotheses: list[dict],
     impact_scope: str,
 ) -> bool:
-    """Flag if the diagnosis mentions services/errors not in evidence."""
-    evidence_text = " ".join(evidence_messages).lower()
+    """Flag if the diagnosis mentions services/errors not in any known material."""
+    evidence_text = known_text
     # Collect all service/entity mentions from the diagnosis
     all_diagnosis_text = diagnosis_summary + " " + impact_scope
     for h in root_cause_hypotheses:

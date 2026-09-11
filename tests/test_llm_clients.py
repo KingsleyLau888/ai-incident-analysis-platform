@@ -102,7 +102,8 @@ def test_openai_compatible_valid_response_uses_real_provider():
                 {
                     "cause": "mysql-primary connection saturation",
                     "confidence": 0.9,
-                    "supporting_evidence": ["DBConnectionTimeout"],
+                    # F10：支持证据必须携带引用 ID（此处证据日志 1 条 → [E1]）
+                    "supporting_evidence": ["[E1] DBConnectionTimeout"],
                 }
             ],
             "impact_scope": "payment-service",
@@ -135,6 +136,9 @@ def test_openai_compatible_valid_response_uses_real_provider():
     assert user_context["evidence_logs"]
     assert "retrieved_runbook_chunks" in user_context
     assert "similar_incidents" in user_context
+    # F10：真实引用不降级、无警告
+    assert result.citation_warnings is None
+    assert result.diagnosis.root_cause_hypotheses[0].confidence == 0.9
 
 
 def test_openai_compatible_decide_action_parses_agent_tool_choice():

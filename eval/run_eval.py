@@ -107,6 +107,9 @@ def _run_judge(case: EvalCase, analysis, judge) -> dict:
             root_cause_hypotheses=list(analysis.root_cause_hypotheses),
             suggested_actions=analysis.structured_suggested_actions or [analysis.suggested_actions],
             impact_scope=analysis.impact_scope,
+            # F10/F12：裁判拿到与诊断模型相同的开卷资料，合法检索引用不再误判
+            retrieved_runbook_chunks=list(analysis.retrieved_runbook_chunks),
+            similar_incidents=list(analysis.similar_incidents),
         )
         return {"status": "succeeded", "verdict": verdict, "error": None}
     except Exception as exc:

@@ -19,6 +19,8 @@ class StructuredDiagnosis(BaseModel):
     root_cause_hypotheses: list[RootCauseHypothesis]
     impact_scope: str
     structured_suggested_actions: list[str]
+    # F10：区分事实/假设/缺失信息——无法从证据确定的点必须单列，不混进结论
+    missing_information: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,8 @@ class DiagnosisResult:
     fallback_reason: str | None = None
     duration_ms: int | None = None
     token_usage: dict | None = None
+    # F10：引用校验结果——伪造/不可核实引用被降级时逐条记录，Trace 可见
+    citation_warnings: list[str] | None = None
 
 
 class LLMClient(Protocol):

@@ -163,6 +163,23 @@ def _extract_keywords(text: str, max_words: int = 8) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def effective_rewrite_provider() -> str:
+    """实际生效的查询改写后端：默认 template，显式开启才用 LLM。
+
+    2026-09-11 真模型评测数据：LLM 改写使 runbook Top-1 88.89% → 81.48%，
+    模板改写检索质量更好。故 LLM 改写改为显式选择（QUERY_REWRITE_PROVIDER=llm），
+    默认关闭——即使诊断模型已接真 AI。
+    """
+    requested = os.getenv("QUERY_REWRITE_PROVIDER", "template").strip().lower()
+    if requested != "llm":
+        return "template"
+    provider = os.getenv("LLM_PROVIDER", "mock")
+    configured = provider == "openai_compatible" and all(
+        os.getenv(key, "") for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
+    )
+    return "llm" if configured else "template"
+
+
 def rewrite_query(
     incident_title: str,
     service_name: str,
@@ -171,24 +188,27 @@ def rewrite_query(
 ) -> RewrittenQueries:
     """Generate query variants for multi-perspective retrieval.
 
-    Tries LLM rewriting first; falls back to templates.
+    Template rewriting is the default (better retrieval quality measured).
+    LLM rewriting only when explicitly enabled via QUERY_REWRITE_PROVIDER=llm;
+    falls back to templates on any failure.
     """
     original = " ".join(
         part for part in [incident_title, service_name, issue_type, evidence_text[:200]] if part
     )
 
-    llm_variants = _llm_rewrite(
-        incident_title=incident_title,
-        service_name=service_name,
-        issue_type=issue_type,
-        evidence_text=evidence_text,
-    )
-    if llm_variants:
-        return RewrittenQueries(
-            original=original,
-            variants=llm_variants,
-            provider="llm",
+    if effective_rewrite_provider() == "llm":
+        llm_variants = _llm_rewrite(
+            incident_title=incident_title,
+            service_name=service_name,
+            issue_type=issue_type,
+            evidence_text=evidence_text,
         )
+        if llm_variants:
+            return RewrittenQueries(
+                original=original,
+                variants=llm_variants,
+                provider="llm",
+            )
 
     template_variants = _template_rewrite(
         incident_title=incident_title,

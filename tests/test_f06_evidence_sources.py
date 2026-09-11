@@ -151,6 +151,7 @@ def test_real_llm_payload_receives_typed_notes_separate_from_logs():
         investigation_notes=["Timeline built with 3 of 3 logs."],
     )
     user_content = json.loads(captured_payload["messages"][1]["content"])
-    # 派生观察单独分型传入，不与原始日志混在 evidence_logs 里
-    assert user_content["investigation_notes"] == ["Timeline built with 3 of 3 logs."]
-    assert user_content["evidence_logs"] == ["DBConnectionTimeout mysql-primary"]
+    # 派生观察单独分型传入，不与原始日志混在 evidence_logs 里；
+    # F10 起日志/笔记带稳定引用 ID（[E1]/[N1]），模型引用必须报编号
+    assert user_content["investigation_notes"] == ["[N1] Timeline built with 3 of 3 logs."]
+    assert user_content["evidence_logs"] == ["[E1] DBConnectionTimeout mysql-primary"]

@@ -26,7 +26,7 @@ from app.models.analysis import AnalysisRun, AnalysisTrace, IncidentEvidence
 from app.models.incident import Incident
 from app.models.log_entry import LogEntry
 from app.rule_engine.detector import detect_issue, suggested_actions_for
-from app.services.query_rewriter import rewrite_query
+from app.services.query_rewriter import effective_rewrite_provider, rewrite_query
 from app.services.rrf import reciprocal_rank_fusion
 from app.services.runbook_retriever import (
     RunbookRetriever,
@@ -81,7 +81,8 @@ def detect_features() -> dict[str, bool | str | int]:
         "retrieval_mode": retrieval_mode,
         "cross_encoder_enabled": CROSS_ENCODER_ENABLED and has_reranker,
         "query_rewriting_enabled": True,  # always active (template fallback)
-        "query_rewriting_provider": "llm" if _has_real_llm() else "template",
+        # F10/F11：默认 template（实测检索更好）；显式 QUERY_REWRITE_PROVIDER=llm 才用 LLM 改写
+        "query_rewriting_provider": effective_rewrite_provider(),
         "analysis_mode": _requested_analysis_mode(),
         "react_agent_enabled": _agent_allowed(),
         "chromadb_available": retrieval_mode == "chromadb" and has_dense,
@@ -95,10 +96,6 @@ def detect_features() -> dict[str, bool | str | int]:
     }
 
 
-def _has_real_llm() -> bool:
-    return os.getenv("LLM_PROVIDER") == "openai_compatible" and bool(
-        os.getenv("LLM_API_KEY")
-    )
 
 
 def _log_window_start(
@@ -643,6 +640,10 @@ def _diagnosis_result_detail(diagnosis_result) -> str:
         parts.append(f"fallback_reason={diagnosis_result.fallback_reason}")
     if diagnosis_result.token_usage:
         parts.append(f"usage={diagnosis_result.token_usage}")
+    # F10：引用护栏结果进 Trace——伪造引用降级必须有据可查
+    if getattr(diagnosis_result, "citation_warnings", None):
+        warnings = diagnosis_result.citation_warnings
+        parts.append(f"citation_warnings={len(warnings)}: {warnings[0][:120]}")
     return "; ".join(parts)
 
 

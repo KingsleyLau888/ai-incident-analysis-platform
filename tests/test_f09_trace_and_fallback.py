@@ -39,7 +39,9 @@ def _diagnose_kwargs():
         service_name="svc",
         issue_type="database_issue",
         severity="high",
-        evidence_logs=[],
+        # F10 起全空输入会弃答（insufficient_evidence），此处给一条证据
+        # 保证本文件的用例走真实 API 调用路径，聚焦 F09 元数据本身。
+        evidence_logs=[SimpleNamespace(message="DBConnectionTimeout")],
         retrieved_runbook_chunks=[],
         similar_incidents=[],
     )
