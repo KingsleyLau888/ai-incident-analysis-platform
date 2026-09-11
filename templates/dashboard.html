@@ -27,7 +27,7 @@ main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template
 <body>
 <header>
   <div><h1>AI Incident Copilot</h1><span class="muted">实时故障诊断</span></div>
-  <div class="status"><span id="live-dot" class="dot"></span><span id="live-text">连接中</span><a href="/dev-tools">开发工具</a><a href="/docs">API</a></div>
+  <div class="status"><span id="live-dot" class="dot"></span><span id="live-text">连接中</span><span id="auth-ui"></span><a href="/dev-tools">开发工具</a><a href="/docs">API</a></div>
 </header>
 <main>
   <section class="metrics">
@@ -56,9 +56,58 @@ const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,sele
 let analysisSeq=0; // 请求编号：响应对不上号即过期，丢弃（F13）
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const tm=v=>v?new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
-const source=new EventSource('/events');
-source.addEventListener('snapshot',e=>{Object.assign(state,JSON.parse(e.data));document.querySelector('#live-dot').classList.add('live');document.querySelector('#live-text').textContent='实时连接';render()});
-source.onerror=()=>{document.querySelector('#live-dot').classList.remove('live');document.querySelector('#live-text').textContent='正在重连'};
+// R04：系统上锁（AUTH_API_KEY）后，EventSource 无法带自定义请求头——
+// 改为 fetch 流式读取 SSE，每个请求附上用户输入的钥匙。
+// 钥匙只存在当前浏览器标签页（sessionStorage），页面刷新后需重输。
+let apiKey=sessionStorage.getItem('apiKey')||'';
+let eventsAbort=null;
+const keyHeaders=()=>apiKey?{'X-API-Key':apiKey}:{};
+function showKeyPrompt(){
+  document.querySelector('#auth-ui').innerHTML=`<input id="api-key-input" type="password" placeholder="API 钥匙（系统已上锁）" style="width:170px;padding:4px 8px;border:1px solid var(--red);border-radius:4px" title="仅保存在当前浏览器标签页，不发给任何第三方"><button onclick="saveKey()" style="margin-left:6px;padding:4px 10px;background:var(--blue);color:#fff;border:0;border-radius:4px;cursor:pointer">保存</button>`;
+  const i=document.querySelector('#api-key-input');i.value=apiKey;i.addEventListener('keydown',e=>{if(e.key==='Enter')saveKey()});
+}
+function saveKey(){
+  apiKey=(document.querySelector('#api-key-input')?.value||'').trim();
+  sessionStorage.setItem('apiKey',apiKey);
+  document.querySelector('#auth-ui').innerHTML='';
+  startEvents(); // 带钥匙重连实时流
+  if(state.selectedIncident){analysisSeq++;state.loadedAnalysis=null;state.loadedAnalysisFor=null;state.analysisLoading=false;loadAnalysis(state.selectedIncident)}
+}
+function blocked(){
+  document.querySelector('#live-dot').classList.remove('live');
+  document.querySelector('#live-text').textContent='访问被拒：请填写 API 钥匙';
+  if(!document.querySelector('#api-key-input'))showKeyPrompt();
+}
+function startEvents(){if(eventsAbort)eventsAbort.abort();eventsAbort=new AbortController();connectEvents(eventsAbort.signal)}
+async function connectEvents(signal){
+  while(!signal.aborted){
+    try{
+      const r=await fetch('/events',{headers:keyHeaders(),signal});
+      if(r.status===401){blocked();break;}
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      document.querySelector('#live-dot').classList.add('live');
+      document.querySelector('#live-text').textContent='实时连接';
+      const reader=r.body.getReader(),decoder=new TextDecoder();
+      let buf='';
+      while(!signal.aborted){
+        const {value,done}=await reader.read();
+        if(done)break;
+        buf+=decoder.decode(value,{stream:true});
+        let idx;
+        while((idx=buf.indexOf('\n\n'))>=0){
+          const block=buf.slice(0,idx);buf=buf.slice(idx+2);
+          const eventMatch=block.match(/^event: (.*)$/m),dataMatch=block.match(/^data: (.*)$/m);
+          if(eventMatch&&eventMatch[1]==='snapshot'&&dataMatch){Object.assign(state,JSON.parse(dataMatch[1]));render();}
+        }
+      }
+    }catch(err){if(signal.aborted)break;}
+    if(signal.aborted)break;
+    document.querySelector('#live-dot').classList.remove('live');
+    document.querySelector('#live-text').textContent='正在重连';
+    await new Promise(res=>setTimeout(res,3000));
+  }
+}
+startEvents();
 function progress(s,p){if(s==='succeeded'||s==='failed')return 100;if(s==='pending')return 8;return {loading_incident:15,log_filtering:28,rule_detection:40,planner_decision:52,knowledge_retrieval:68,summary_generation:82,persistence:94}[p]||20}
 function render(){
   document.querySelector('#m-services').textContent=state.services.length;
@@ -90,8 +139,9 @@ function selectService(id){analysisSeq++;state.selectedService=state.selectedSer
 async function loadAnalysis(id){
   const seq=++analysisSeq;state.analysisLoading=true;
   try{
-    const r=await fetch(`/incidents/${id}/analysis`);
+    const r=await fetch(`/incidents/${id}/analysis`,{headers:keyHeaders()});
     if(seq!==analysisSeq)return; // 期间已切走：过期响应，丢弃（F13）
+    if(r.status===401){blocked();state.analysisLoading=false;return;}
     if(!r.ok){
       state.loadedAnalysis=null;
       const job=state.jobs.find(x=>x.incident_id===id);
@@ -104,7 +154,8 @@ async function loadAnalysis(id){
     const data=await r.json();
     if(seq!==analysisSeq)return;
     state.loadedAnalysis=data;state.loadedAnalysisFor={incidentId:id,runId:data.id};
-    const t=await fetch(`/incidents/${id}/trace`);
+    const t=await fetch(`/incidents/${id}/trace`,{headers:keyHeaders()});
+    if(t.status===401)blocked();
     if(seq!==analysisSeq)return;
     state.loadedAnalysis.trace=t.ok?await t.json():[];
   }catch(err){state.loadedAnalysis=null;state.loadedAnalysisFor=null;if(seq!==analysisSeq)return;renderAnalysis(null);}

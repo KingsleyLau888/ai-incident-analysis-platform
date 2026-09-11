@@ -32,10 +32,15 @@ from app.services import (
 
 # 路由级门锁（F16）：AUTH_API_KEY 未设置时放行（演示模式），设置后全部接口
 # （含 /health 与页面）都要求 X-API-Key 钥匙，否则 401。
-router = APIRouter(dependencies=[Depends(verify_api_key)])
-
 # Dashboard templates
 templates = Jinja2Templates(directory=Path(__file__).resolve().parents[2] / "templates")
+
+# R04（2026-09-11 复核）：页面是纯静态壳、不带任何数据；上锁后浏览器必须
+# 先拿到页面才能输入钥匙，再由 JS 把 X-API-Key 附到每个数据请求上。因此
+# 页面路由挂在无锁 pages_router 上；数据/写入接口仍全部经带锁 router。
+pages_router = APIRouter()
+
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -64,13 +69,13 @@ def get_features():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@router.get("/", response_class=HTMLResponse)
+@pages_router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
     """Main dashboard page — create services, logs, incidents, and analyze."""
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
-@router.get("/dev-tools", response_class=HTMLResponse)
+@pages_router.get("/dev-tools", response_class=HTMLResponse)
 def dev_tools(request: Request):
     return templates.TemplateResponse("dev_tools.html", {"request": request})
 

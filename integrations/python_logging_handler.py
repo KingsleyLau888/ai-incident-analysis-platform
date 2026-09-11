@@ -7,6 +7,9 @@ F18：默认异步批处理——`emit()` 只把记录放入有界队列（满�
 
 发送体带 `timestamp` = 记录原始发生时间（record.created），
 平台侧 F04 会将其归一为 UTC 并与送达时间（received_at）区分。
+
+F16 带锁平台：设置 `AUTH_API_KEY` 后所有数据接口要求 `X-API-Key`，
+handler 需传入同样的 `api_key`，否则日志全部被 401 拒收（丢弃可经 stats 观测）。
 """
 
 from __future__ import annotations
@@ -42,10 +45,13 @@ class IncidentPlatformHandler(logging.Handler):
         batch_size: int = 20,
         flush_interval: float = 0.5,
         client_factory: object | None = None,
+        api_key: str | None = None,
     ) -> None:
         super().__init__(level=level)
         self.platform_url = platform_url.rstrip("/")
         self.service_name = service_name
+        # F16：平台带锁（AUTH_API_KEY）时，业务侧传同一把钥匙，否则 401 全丢
+        self.api_key = api_key
         self.timeout = timeout
         self.async_mode = async_mode
         self.batch_size = max(1, batch_size)
@@ -163,7 +169,10 @@ class IncidentPlatformHandler(logging.Handler):
             return self._service_id
 
     def _make_client(self) -> httpx.Client:
-        return self._client_factory()
+        client = self._client_factory()
+        if self.api_key:
+            client.headers["X-API-Key"] = self.api_key
+        return client
 
     def _record_failure(self, error: str) -> None:
         self._dropped += 1

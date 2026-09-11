@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.routes import router
+from app.api.routes import pages_router, router
 from app.database import Base, get_db
 from app.models import base
 from app.services.embedding_service import get_sentence_transformer_embedder
@@ -47,6 +47,7 @@ def client() -> TestClient:
             db.close()
 
     app = FastAPI()
+    app.include_router(pages_router)
     app.include_router(router)
     app.dependency_overrides[get_db] = override_get_db
 

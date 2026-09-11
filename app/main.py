@@ -9,7 +9,7 @@ from app.config import prepare_config
 
 prepare_config()
 
-from app.api.routes import router
+from app.api.routes import pages_router, router
 from app.database import Base, engine
 from app.database_migrations import (
     ensure_active_job_unique_index,
@@ -48,6 +48,8 @@ def create_app() -> FastAPI:
     )
     # 请求保护（F16）：大小上限 + 写入频率限流（环境变量可调，默认宽松）
     apply_request_protection(app)
+    # R04：页面壳无锁（浏览器需先拿到页面输入钥匙），数据/写入接口带锁
+    app.include_router(pages_router)
     app.include_router(router)
     return app
 
