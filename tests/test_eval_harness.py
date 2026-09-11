@@ -63,6 +63,12 @@ def test_run_eval_generates_metrics_and_report(tmp_path, monkeypatch):
         "similar_incident_precision_at_3",
         "failed_case_count",
         "average_latency_ms",
+        # F12：弃答/引用降级/token 成本/后端分布（评测口径扩展）
+        "insufficient_evidence_count",
+        "citation_downgraded_case_count",
+        "citation_warning_total",
+        "total_tokens",
+        "provider_distribution",
     }
     assert report_path.exists()
     report_text = report_path.read_text(encoding="utf-8")

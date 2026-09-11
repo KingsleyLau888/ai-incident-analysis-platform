@@ -1,4 +1,6 @@
 import argparse
+import ast
+import hashlib
 import json
 import os
 import re
@@ -82,6 +84,8 @@ def run_eval(
             "metrics": metrics,
             "cases": case_results,
             "failed_cases": [result for result in case_results if not result["passed"]],
+            # F12：评测口径自证——换数据集/语料/模型后指纹与配置必变
+            "environment": _evaluation_environment(),
         }
         write_report(report, report_path)
         return report
@@ -124,6 +128,83 @@ def _desensitize_error(exc: Exception, max_length: int = 200) -> str:
     return text[:max_length]
 
 
+# ── F12：评测口径自证（数据集/语料指纹 + 执行元数据解析） ───────────────
+
+
+def _sha256_file(path: Path) -> str | None:
+    """文件内容指纹（截断到 16 位）：换一份数据/语料，指纹必变。"""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return None
+
+
+def _sha256_corpus(directory: Path) -> str | None:
+    """目录语料指纹：按相对路径排序后的全部文件内容哈希，与文件顺序无关。"""
+    try:
+        files = sorted(p for p in directory.rglob("*") if p.is_file())
+    except OSError:
+        return None
+    if not files:
+        return None
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.relative_to(directory).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def _evaluation_environment() -> dict:
+    """报告自证口径：数据集/语料指纹 + 环境配置，防止旧报告冒充新评测。"""
+    return {
+        "dataset_sha256": _sha256_file(DEFAULT_CASES_PATH),
+        "runbook_corpus_sha256": _sha256_corpus(PROJECT_ROOT / "runbooks"),
+        "historical_incidents_sha256": _sha256_file(
+            PROJECT_ROOT / "data" / "historical_incidents.json"
+        ),
+        "llm_provider_env": os.getenv("LLM_PROVIDER"),
+        "llm_model_env": os.getenv("LLM_MODEL"),
+        "cross_encoder_enabled_env": os.getenv("CROSS_ENCODER_ENABLED"),
+    }
+
+
+def _summary_metadata(analysis) -> dict:
+    """从 summary_generation Trace 解析执行元数据（F09 写入的文本）。
+
+    provider 分布用于区分真实模型/降级/弃答；citation_warnings 数即
+    引用降级数；usage 只取 total_tokens（API 回传时才有）。
+    """
+    metadata = {
+        "provider": "unknown",
+        "requested_provider": None,
+        "total_tokens": None,
+        "citation_warnings": 0,
+    }
+    for trace in getattr(analysis, "traces", []) or []:
+        if trace.step_name != "summary_generation":
+            continue
+        detail = trace.detail or ""
+        match = re.search(r"provider=([^;\s]+)", detail)
+        if match:
+            metadata["provider"] = match.group(1)
+        match = re.search(r"requested=([^;\s]+)", detail)
+        if match:
+            metadata["requested_provider"] = match.group(1)
+        match = re.search(r"citation_warnings=(\d+)", detail)
+        if match:
+            metadata["citation_warnings"] = int(match.group(1))
+        match = re.search(r"usage=(\{[^}]*\})", detail)
+        if match:
+            try:
+                usage = ast.literal_eval(match.group(1))
+                metadata["total_tokens"] = usage.get("total_tokens")
+            except (ValueError, SyntaxError):
+                pass
+        break
+    return metadata
+
+
 def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -135,16 +216,64 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
         "",
         f"Total cases: {report['total_cases']}",
         "",
-        "## Metrics",
-        "",
     ]
+
+    # F12：评测口径自证——数据集/语料指纹 + 环境配置。指纹不同 = 报告与
+    # 当前数据对不上，不能拿旧成绩冒充新评测。
+    environment = report.get("environment") or {}
+    if environment:
+        lines.extend(["## Evaluation Environment (评测口径自证)", ""])
+        if environment.get("dataset_sha256"):
+            lines.append(
+                f"- dataset: eval_cases.json sha256={environment['dataset_sha256']}"
+            )
+        if environment.get("runbook_corpus_sha256"):
+            lines.append(
+                f"- runbook corpus: runbooks/ sha256={environment['runbook_corpus_sha256']}"
+            )
+        if environment.get("historical_incidents_sha256"):
+            lines.append(
+                "- historical incidents: data/historical_incidents.json "
+                f"sha256={environment['historical_incidents_sha256']}"
+            )
+        lines.append(
+            "- LLM provider (env): "
+            f"{environment.get('llm_provider_env') or 'unset'} / model: "
+            f"{environment.get('llm_model_env') or 'unset'}"
+        )
+        lines.append(
+            "- cross encoder (env): "
+            f"{environment.get('cross_encoder_enabled_env') or 'unset'}"
+        )
+        lines.append("")
+
+    lines.extend(["## Metrics", ""])
     for name, value in report["metrics"].items():
         if name == "average_latency_ms":
             lines.append(f"- {name}: {value:.2f}")
-        elif name == "failed_case_count":
+        elif name in {
+            "failed_case_count",
+            "insufficient_evidence_count",
+            "citation_downgraded_case_count",
+            "citation_warning_total",
+            "total_tokens",
+        }:
             lines.append(f"- {name}: {value}")
+        elif name == "provider_distribution":
+            continue  # 单独成行，避免 dict 被当百分比格式化
+        elif name.startswith("judge_"):
+            continue  # judge 指标在 LLM Judge Summary 一节完整呈现
         else:
             lines.append(f"- {name}: {value:.2%}")
+    provider_distribution = report["metrics"].get("provider_distribution")
+    if provider_distribution:
+        lines.append(
+            "- provider_distribution: "
+            + ", ".join(
+                f"{provider}={count}"
+                for provider, count in sorted(provider_distribution.items())
+            )
+        )
 
     lines.extend(["", "## Cases", ""])
     for result in report["cases"]:
@@ -170,8 +299,16 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
                 f"- similar_incident_top1_correct: {result['similar_incident_top1_correct']}",
                 f"- similar_incident_precision_at_3: {result['similar_incident_precision_at_3']:.2%}",
                 f"- latency_ms: {result['latency_ms']:.2f}",
+                f"- provider: {result.get('provider', 'unknown')}",
             ]
         )
+        # F12：逐案例实录——请求后端（降级时可见）、引用降级数、token 成本
+        if result.get("requested_provider"):
+            lines.append(f"- requested_provider: {result['requested_provider']}")
+        if result.get("token_usage_total"):
+            lines.append(f"- token_usage_total: {result['token_usage_total']}")
+        if result.get("citation_warnings"):
+            lines.append(f"- citation_warnings: {result['citation_warnings']}")
         # LLM Judge results — explicit status so failures are never silent
         if report.get("judge_enabled"):
             lines.append(f"- judge_status: {result.get('judge_status', 'unknown')}")
@@ -236,11 +373,16 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
             "",
         ])
         if metrics.get("judge_succeeded"):
+            flagged = metrics.get("judge_flagged_hallucination_count", 0)
             lines.extend([
                 f"- avg diagnosis_coherence: {metrics.get('judge_diagnosis_coherence', 0):.2%}",
                 f"- avg evidence_grounding: {metrics.get('judge_evidence_grounding', 0):.2%}",
-                f"- hallucination_rate: {metrics.get('judge_hallucination_rate', 0):.2%}",
+                # F12 措辞：样本内未检出幻觉标记 ≠ 幻觉率恒为 0，必须写明口径
+                f"- judge_flagged_hallucination_count: {flagged} / {metrics.get('judge_succeeded', 0)}",
                 f"- avg actionability: {metrics.get('judge_actionability', 0):.2%}",
+                "- 口径说明：hallucination_flag 是裁判在本次样本内的标记结果，"
+                "未检出不等于幻觉率为 0（小样本、裁判与诊断同模型时存在自评偏置，"
+                "仅供内部趋势参考）。",
                 "",
             ])
         else:
@@ -356,6 +498,8 @@ def _score_case(
         runbook_recall=runbook_recall,
         similar_incident_recall=similar_incident_recall,
     )
+    # F12：执行元数据（provider/弃答/引用降级/token 成本）从 Trace 实录解析
+    summary_metadata = _summary_metadata(analysis)
 
     result: dict = {
         "case_id": case.case_id,
@@ -384,6 +528,10 @@ def _score_case(
         "passed": passed,
         "failure_categories": failure_categories,
         "possible_failure_reason": _possible_failure_reason(failure_categories),
+        "provider": summary_metadata["provider"],
+        "requested_provider": summary_metadata["requested_provider"],
+        "token_usage_total": summary_metadata["total_tokens"],
+        "citation_warnings": summary_metadata["citation_warnings"],
     }
 
     judge_outcome = judge_outcome or {"status": "skipped", "verdict": None, "error": None}
@@ -457,6 +605,30 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         "average_latency_ms": sum(result["latency_ms"] for result in results) / total,
     }
 
+    # F12：弃答/引用降级/token 成本/后端分布——"诊断准确率"不能只看检索分
+    metrics["insufficient_evidence_count"] = sum(
+        1
+        for result in results
+        if str(result.get("provider", "")).endswith("insufficient_evidence")
+    )
+    metrics["citation_downgraded_case_count"] = sum(
+        1 for result in results if result.get("citation_warnings")
+    )
+    metrics["citation_warning_total"] = sum(
+        result.get("citation_warnings") or 0 for result in results
+    )
+    token_totals = [
+        result.get("token_usage_total")
+        for result in results
+        if result.get("token_usage_total")
+    ]
+    metrics["total_tokens"] = sum(token_totals) if token_totals else 0
+    provider_counts: dict[str, int] = {}
+    for result in results:
+        provider = result.get("provider", "unknown")
+        provider_counts[provider] = provider_counts.get(provider, 0) + 1
+    metrics["provider_distribution"] = provider_counts
+
     # LLM Judge aggregate metrics — only present when the judge was actually
     # attempted for at least one case (disabled runs keep the baseline key set).
     attempted = [r for r in results if r.get("judge_status") in ("succeeded", "failed")]
@@ -483,6 +655,9 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         )
         metrics["judge_hallucination_rate"] = (
             sum(1 for r in judge_results if r["judge_verdict"]["hallucination_flag"]) / len(judge_results)
+        )
+        metrics["judge_flagged_hallucination_count"] = sum(
+            1 for r in judge_results if r["judge_verdict"]["hallucination_flag"]
         )
         metrics["judge_actionability"] = (
             sum(r["judge_verdict"]["actionability"] for r in judge_results) / len(judge_results)
