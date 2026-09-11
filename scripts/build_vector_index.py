@@ -31,6 +31,11 @@ def main() -> None:
         default=None,
         help="Optional ChromaDB persistence directory. Defaults to CHROMA_PERSIST_DIR or runtime/vector_store/chroma.",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="F08：只检查索引新鲜度（对比语料签名），不重建；有陈旧时以退出码 1 结束。",
+    )
     args = parser.parse_args()
 
     embedder = get_sentence_transformer_embedder()
@@ -45,6 +50,15 @@ def main() -> None:
         if args.persist_dir is not None
         else VectorStore(embed_fn=embedder.encode)
     )
+
+    if args.check:
+        stale = False
+        for name, part in store.freshness_status().items():
+            reason = f" ({part['reason']})" if part.get("reason") else ""
+            print(f"{name}: {part['status']}{reason}")
+            stale = stale or part["status"] == "stale"
+        raise SystemExit(1 if stale else 0)
+
     store.ensure_initialized(force=args.force)
 
     print(f"ChromaDB persist_dir: {store.persist_dir}")

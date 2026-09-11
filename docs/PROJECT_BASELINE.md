@@ -10,9 +10,9 @@
 
 | 项目 | 当前记录 |
 |---|---|
-| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed）、F03（事故去重依赖初步类型、事故任务原子提交、并发单建锁+唯一索引、手动分析建任务、服务重名稳定返回，115 passed）、F04（时间账本：入账统一 UTC（实测旧代码 +08:00 偏 8 小时）、计数窗口补上界、received_at 送达时间、source 出身代替标题、手动分析窗口封顶，129 passed）、F16（可选接入钥匙门锁 + 请求大小/写入频率限额 + 凭据不泄漏，140 passed）、F15 收尾（SQLite 外键检查开启：运行库体检 9 类孤儿全 0，147 passed）、F05（Agent 取证门禁：成功状态记录 + 诊断前置校验 + 未知动作报决策错误 + 参数限额 + insufficient_evidence）与 F06（检索查询透传 + 证据分型溯源 + 笔记不冒充日志，159 passed）、F17（统一配置校验 + .env 显式加载 + 坏配置快速报错 + 依赖分组文档，167 passed）、F18（日志接入异步有界缓冲 + 连接复用 + 丢弃可观测 + 原始事件时间，175 passed）。**P0/P1 可自主完成项全部收工** |
-| 当前阶段 | 主链路功能已存在，正确性与可信度收敛阶段（P0+P1 自主项完成） |
-| 建议下一项 | 无代码待办（自主范围内）；用户可选：F10/F12 真实模型评测（需真实 API）或 F13/F14 浏览器实测（需用户配合） |
+| 本轮完成 | Runbook 检索重优化（用户批准计划）：chunk 类型标注计分制修复误标、查询构建带入证据词、过滤策略与融合参数全消融；27 例 Top-1 55.56%→88.89%、Recall 77.16%→84.57%；22 例消融 tfidf 单查询 Top-1 100%；4 后端对比 hybrid 92.59%。随后按"小步消化"节奏修复 F07（Judge 静默失效：27/27 出分）、F01（分析结果原子性：persistence 进度移至提交后 + 3 项故障注入测试）、F15（反馈存在性 404 + 正反馈正确性过滤 + 竞态收敛）与 F13（Dashboard 竞态：过期响应丢弃 + run ID 缓存 + 404 空态与统计卡口径，92 passed）与 F14（SSE 查询限额 + 流式接口真进度不阻塞事件循环 + simulated 如实标注，98 passed）、F02（任务幂等与启动恢复：原子领取、成功重入不重跑、开机清场、接口防连点，105 passed）、F03（事故去重依赖初步类型、事故任务原子提交、并发单建锁+唯一索引、手动分析建任务、服务重名稳定返回，115 passed）、F04（时间账本：入账统一 UTC（实测旧代码 +08:00 偏 8 小时）、计数窗口补上界、received_at 送达时间、source 出身代替标题、手动分析窗口封顶，129 passed）、F16（可选接入钥匙门锁 + 请求大小/写入频率限额 + 凭据不泄漏，140 passed）、F15 收尾（SQLite 外键检查开启：运行库体检 9 类孤儿全 0，147 passed）、F05（Agent 取证门禁：成功状态记录 + 诊断前置校验 + 未知动作报决策错误 + 参数限额 + insufficient_evidence）与 F06（检索查询透传 + 证据分型溯源 + 笔记不冒充日志，159 passed）、F17（统一配置校验 + .env 显式加载 + 坏配置快速报错 + 依赖分组文档，167 passed）、F18（日志接入异步有界缓冲 + 连接复用 + 丢弃可观测 + 原始事件时间，175 passed）、F09（降级元数据与 Trace 实录：结构化执行元数据 + 计时隔离 + 实际查询按执行记录，185 passed）、F08（索引新鲜度签名：语料签名 + 先嵌入再替换 + 空语料清空 + --check 体检，193 passed）。**P0/P1 可自主完成项全部收工** |
+| 当前阶段 | 主链路功能已存在，正确性与可信度收敛阶段（P0 全清；P1 可自主完成项全部收工，剩余 P1 均依赖外部条件） |
+| 建议下一项 | 无代码待办（自主范围内）；剩余 P1 均依赖外部条件：F10 端到端证据契约与 F12 指标缺口（真实模型评测，需真实 API/花费）、F11 Recall 84.57%（差 0.43，剩余 5 例已归因：2 跨类型结构性 + 3 稀疏词面）、F13/F14 浏览器实测（需用户配合） |
 | 随后处理 | 真实接入时再评估：F18 压力场景实测、多进程限流外部存储、CrossEncoder 模型下载决策 |
 | 随后处理 | F16：真实数据/共享部署前安全边界 |
 | 评测前置项 | F07 已完成（2026-09-09）：Judge 序列化修复、requested/attempted/succeeded/failed/skipped 显式统计与脱敏错误；可继续讨论真实模型质量评测（F10/F12 剩余指标） |
@@ -188,16 +188,13 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：27 例开 Judge 实测 succeeded=27/27、failed=0（修复前 27/27 静默失败），报告含 LLM Judge Summary；新增 4 项回归测试（成功路径、失败显式化+脱敏、关闭时无输出），全套 85 passed。证据：`runtime/audit/eval-f07-judge-20260909-132424.md`。
 - 备注：MockJudge 启发式分数（coherence 100%、grounding 73.7%、actionability 18.77%）只作机制验证，不代表真实模型质量；真实 Judge 评测属 F10/F12 范畴。
 
-### F08 · P1：索引按数量判断新鲜度，重建先删旧数据
+### F08 · P1：索引按数量判断新鲜度，重建先删旧数据 — **已修复（2026-09-11）**
 
-- 证据：`vector_store.py:120`、`:156` 数量相同直接返回；`:138`、`:174` 先删除旧数据再 embedding/add；默认使用共享临时目录（2026-09-08 起默认改为项目内 `runtime/vector_store/chroma`，`CHROMA_PERSIST_DIR` 仍可覆盖，本条目其余部分未变）。
-- 后果：内容修正但数量不变时保留旧 embedding；来源清空时保留旧集合；重建失败可失去可用索引。数量分支已用替身验证，真实 Chroma 运行未测。
-- 修改：记录语料 hash、模型与分块版本；按 ID/hash 更新删除，或新集合验证后切换；缓存按项目隔离。
-- 验收：同数量内容变化、删除、空库、模型切换和中断都不悄悄复用错误索引。
-- 工作量中到高（索引、故障测试）；收益高（知识修正必须实际生效）。
-- 2026-09-09 实操注记：chunk 类型标注修复后（数量仍 244）用 `scripts/build_vector_index.py --force`
-  重建索引并实测 effective_mode=chromadb（169ms 查询），确认"改动 chunker 后必须 --force 重建"
-  是实际约束；`--force` 可绕过数量分支，但"内容变化不通知"的自动新鲜度缺口仍存在。
+- 证据（历史）：`vector_store.py` 数量相同直接返回；先删除旧数据再 embedding/add；默认使用共享临时目录（2026-09-08 起默认已改为项目内 `runtime/vector_store/chroma`，`CHROMA_PERSIST_DIR` 仍可覆盖）。
+- 后果（历史）：内容修正但数量不变时保留旧 embedding；来源清空时保留旧集合；重建失败可失去可用索引。
+- 修改（已实施）：语料签名 = SHA-256（排序后的每条目稳定字符串 + 嵌入模型名 + 分块 schema 版本 `CHUNK_SCHEMA_VERSION`/`INCIDENT_SCHEMA_VERSION`），随集合元数据写入；`_index_runbooks`/`_index_incidents` 只在数量与签名全一致时复用索引，否则**先嵌入（耗时/易失败阶段）再替换旧数据**——嵌入失败旧索引原样可用；空语料同样走替换路径（来源清空不再保留旧集合）；`freshness_status()` 只读体检（fresh/stale/unavailable + not_signed/count_changed/content_or_model_changed），`scripts/build_vector_index.py --check` 接入（陈旧退出码 1）。
+- 验收：新增 tests/test_f08_index_freshness.py 8 项（同数量内容变化重建、内容未变复用、数量变化、空语料清空、模型切换重建、嵌入失败保旧索引、freshness_status 原因、未签名旧库判定）；全套 193 passed；旧代码反向验证 7/8 失败（1 过：数量变化重建为旧行为锁定项）；真实 ChromaDB 实测：旧索引 `--check` 报 stale(not_signed) 退出 1 → `--force` 重建 244 chunks/34 incidents → `--check` fresh 退出 0。
+- 遗留：替换阶段（delete+add）为本地磁盘写入，若该阶段中断索引会暂时为空，下次启动按数量/签名差异自动重建（不会静默复用错误索引）；未做"新集合验证后切换"（chromadb 不支持集合重命名，等价收益小）。
 
 ### F09 · P1：降级信息与 Trace 不完整 — **已修复（2026-09-11）**
 
@@ -411,6 +408,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-10 | F05 + F06（用户授权全自主推进）：F05 Agent 取证门禁（successful_tools 状态记录、generate_diagnosis 前置 search_logs+detect_signals、未知动作报决策错误不再静默转诊断、seen_calls 代码级拒绝重复调用、_bounded_int 参数限额、预算耗尽证据不足返回 insufficient_evidence 并落占位诊断+Trace 标注）；F06 证据来源分型（retrieve_with_query 公开查询检索、_AgentObservationLog 假日志移除、diagnose 全链路新增 investigation_notes 独立字段、关键词命中按 log id 去重并入证据） | 新增 tests/test_f05_agent_safeguards.py 6 项 + tests/test_f06_evidence_sources.py 6 项；全套 159 passed；旧代码反向验证 11/12 失败（1 过：查询回退为旧行为锁定项）；现有 3 项 Agent 端到端测试不受门禁影响 | F05/F06 标记已修复；下一步 F17（配置治理）/F18（日志接入缓冲） |
 | 2026-09-10 | F17（用户授权全自主推进）：`app/config.py` 统一配置清单与启动校验（枚举/布尔/整数/浮点 21 项 + openai_compatible 三件套）；`prepare_config()` 启动加载 runtime/.env → .env（不覆盖已导出变量）+ 坏配置 RuntimeError 快速失败；requirements.txt 分组（基础/可选检索/测试）+ Python 3.11 + venv 版本差异记录；DESIGN Future Work 校正指向基线 | 新增 tests/test_f17_config_governance.py 8 项；全套 167 passed；旧代码反向验证：模块不存在收集失败；真实服务冒烟（坏配置启动即报错、好配置临时库 200）；实测用户 .env 生效（DATABASE_URL=incident-live.db）且该库提前完成全部迁移（37 日志回填、4 事故出身/类型回填、索引安全、孤儿全 0） | F17 标记已修复；下一步 F18 |
 | 2026-09-10 | F18（用户授权全自主推进）：`IncidentPlatformHandler` 默认异步批处理（有界队列 emit 不阻塞、后台单线程复用连接、丢弃计数、close 排空、stats 观测）；发送体带原始 record.created；服务解析移后台并缓存；Demo 显式同步模式保持历史行为 | 新增 tests/test_f18_logging_handler.py 8 项（MockTransport 注入：慢平台 emit<0.1s、原始时间戳、队列溢出丢弃可观测、故障不阻塞、close 排空 4/4、服务解析一次、同步模式保留）；全套 175 passed；旧代码反向验证 8/8 失败 | F18 标记已修复；**P0/P1 自主项全部收工**；剩余均为需用户参与项（F10/F12 真实 API 评测、F13/F14 浏览器实测） |
+| 2026-09-11 | F09 + F08（用户授权全自主推进）：F09 降级元数据与 Trace 实录（DiagnosisResult 五字段结构化执行元数据、降级客户端记录请求后端/异常摘要/耗时、OpenAI 回传 model/usage、计时 sink 入口清空 + 检索器实例级隔离、pipeline_meta 实录改写 provider/变体/实际查询、Trace 四步骤按实际执行，"(original)" 占位符消除）；F08 索引新鲜度（语料签名 SHA-256 写入集合元数据、数量+签名全一致才复用、先嵌入再 delete+add 替换、嵌入失败旧索引原样可用、空语料清空、freshness_status() 只读体检、build_vector_index.py --check 陈旧退出码 1） | 新增 tests/test_f09_trace_and_fallback.py 10 项 + tests/test_f08_index_freshness.py 8 项；全套 193 passed；旧代码反向验证 17/18 失败（1 过：数量变化重建为旧行为锁定项）；真实服务冒烟（F09：不可达后端 Trace 显示 provider=mock_fallback、requested=openai_compatible、model=smoke-model、duration=1309ms、fallback_reason=HTTPStatusError…502；F08：真实 ChromaDB 旧索引 stale(not_signed) exit 1 → --force 重建 244 chunks/34 incidents → fresh exit 0；冒烟数据已清理） | F08/F09 标记已修复；**P1 可自主完成项全部收工**；剩余 P1：F10 端到端证据契约 + F12 指标缺口（需真实 API 评测）、F11 Recall 84.57% 差 0.43（剩余 5 例已归因，hard 过滤为消融裁决保留）、F13/F14 浏览器实测（需用户配合） |
 
 每次工作更新此模板，不另建竞争性总计划：
 
