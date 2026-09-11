@@ -6,7 +6,26 @@
 > 标准：L3，可交接、可验证的长期项目；按本地原型评估，不假定已经上线。
 > 本次交付是审查与文档约定，**下列业务问题尚未修复**。
 
-## 1. 当前接续状态：下次从这里开始
+## 0. 最新复核与接续状态（2026-09-11，以本节为准）
+
+用户要求复核是否按基线执行以及当前质量。本次基于 `f2e9c42` 干净工作区重新审查；详情见 [本轮复核证据](REVIEW_2026-09-11.md)，它是本基线的附件，不另立总计划。
+
+**结论（2026-09-12 更新）：复核六项意见 R01–R06 全部核实成立，并按用户批准的五步计划全部修复（F17 配置时序 → F10 空证据 → F06/F10 持久化 → F16/F18 带锁链路 → F12 评测口径），每步均有新测试 + 旧代码反向验证。** 全套 231 passed（5 warnings，均为既有弃用提示）；Mock/TF-IDF 27 案例复测 Top-1 88.89%、Recall 84.57%、失败 9 例——与复核时基线完全一致，无回归。五笔主题提交：`b392571`（R01）、`3e19be6`（R02）、`23d76e2`（R03）、`d46d339`（R04）、`2772f84`（R05）。
+
+| 当前事项 | 接续要求 |
+|---|---|
+| F17（R01）已修复 | `.env` 移到 `app.main` 模块最顶层加载（先于 database/embedding 导入）；独立子进程验收测试证明 engine 与重排开关按真实配置初始化；已提交 `b392571` |
+| F10（R02）已修复 | 空 supporting_evidence 的根因假设与伪引用同等降级（[UNVERIFIED] + 置信度封顶 0.35）；已提交 `3e19be6` |
+| F06/F10（R03）已修复 | missing_information / investigation_notes / final_evidence_log_ids 三栏落库 + 旧库迁移 + API 输出 + Dashboard 展示；Agent 关键词命中日志进最终证据并带出身标注；已提交 `23d76e2` |
+| F16/F18（R04）已修复 | 页面壳（/ 与 /dev-tools）移入无锁 pages_router（纯静态无数据），数据/写入接口仍全部带锁；Dashboard SSE 改 fetch 流式带 X-API-Key + 401 钥匙输入框（sessionStorage）；logging handler 新增 api_key 参数；已提交 `d46d339` |
+| F12（R05）已修复 | 报告新增数据集/语料 SHA-256 指纹 + 模型配置自证；弃答/引用降级/token 成本/后端分布进指标与逐案例实录；裁判措辞改为标记数/样本数并写明"未检出≠幻觉率为 0"；已提交 `2772f84` |
+| 带锁浏览器实测 | 待用户实测：http://127.0.0.1:8011（隔离演示库 + 钥匙 demo-key-2026）；接口层与 handler 层冒烟已通过 |
+| F11 未完成 | Recall 84.57% 差 0.43（2 跨类型结构性 + 3 稀疏词面，已归因）；本轮按批准范围不追分 |
+| 新发现边界 | FastAPI 自带的 /docs 与 /openapi.json 不经过 router 依赖，上锁时仍开放（只见 schema 不见数据）；本轮记录不动，如需封闭再单独立项 |
+
+后续建议：① 用户带锁浏览器实测（8011）；② 按需封闭 /docs（新增边界）；③ F11 Recall 追分或维持（用户决定）；④ 推送代码（等用户拍板）。历史修复的有效部分保留，完整证据与验收条件见附件。真实模型历史报告不等于本轮重测结果。
+
+## 1. 前轮交接快照（历史记录，当前状态以第 0 节为准）
 
 | 项目 | 当前记录 |
 |---|---|
@@ -171,7 +190,7 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - 参数强类型与限额：`_bounded_int`（top_k 1-20、limit 1-50、keyword 非空），非法参数报 `_ToolInputError` 且不计成功。
 - 验收：新增 tests/test_f05_agent_safeguards.py 6 项（零取证诊断拒绝、预算耗尽如实返回、未知动作继续调查、重复调用拒绝、非法 top_k 拒绝、确定性工作流不受门禁影响）；全套 159 passed（含 F06 新增）；旧代码反向验证 F05/F06 共 11/12 失败（1 过：查询回退为旧行为锁定项）。
 
-### F06 · P1：Agent 查询未传入检索器，证据来源混用 — **已修复（2026-09-10）**
+### F06 · P1：Agent 查询未传入检索器，证据来源混用 — **已修复（2026-09-10 基础，2026-09-12 R03 持久化收尾）**
 
 - 证据（历史）：`analysis_service.py:473` 两个检索闭包接收 query 但未使用；`:484` 将 investigation_notes 包成 `id=0` 日志传给 LLM；notes 来自工具统计和摘要。**代码确认。**
 - 修改（已实施）：
@@ -179,7 +198,8 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - 原始日志与派生观察分型：`_AgentObservationLog`（id=0 假日志）移除；`diagnose()` 全链路（Protocol/mock/openai_compatible）新增 `investigation_notes` 参数，真实 LLM 提示词以独立字段读入笔记，不再与 evidence_logs 混用；
   - 关键词搜索命中的日志按 log id 去重进入 `ctx["keyword_matches"]`，最终并入诊断证据（真实 log id，可回溯），笔记中记录命中 id 列表；
   - 结论只引用本次收集的来源：证据/笔记/手册/历史全部来自当前 ctx。
-- 验收：新增 tests/test_f06_evidence_sources.py 6 项（查询透传、回退查询、公开检索方法、关键词命中 id 记录、真实 LLM payload 分型字段）；全套 159 passed；旧代码反向验证 F05/F06 共 11/12 失败（1 过：查询回退为旧行为锁定项）。
+- **R03（2026-09-12）：持久化溯源端到端补齐**——`AnalysisRun` 新增 `investigation_notes`（[N#] 编号映射）与 `final_evidence_log_ids`（[E#] 编号映射）两栏 + 旧库迁移 + API 输出；pipeline/Agent 统一走 `_merged_agent_evidence` 合并规则证据与 Agent 关键词命中日志，证据行 reason 区分 `Matched <type> rule.` / `Agent keyword search match.`（提交 `23d76e2`）。
+- 验收：新增 tests/test_f06_evidence_sources.py 6 项（查询透传、回退查询、公开检索方法、关键词命中 id 记录、真实 LLM payload 分型字段）；全套 159 passed；旧代码反向验证 F05/F06 共 11/12 失败（1 过：查询回退为旧行为锁定项）。R03 新增 tests/test_r03_output_persistence.py 5 项（模型往返、旧库迁移、pipeline 落库+API、Agent 额外关键词日志带出身持久化），旧代码反向验证 5/5 失败，全套 231 passed。
 
 ### F07 · P0（评估）：Judge 调用前失败，被静默忽略 — **已修复（2026-09-09）**
 
@@ -203,7 +223,7 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：新增 tests/test_f09_trace_and_fallback.py 10 项（降级元数据、成功透传、坏配置降级、OpenAI 元数据、计时 sink 入口重置、重排计时、实例级隔离、Trace 实际查询与改写 provider、summary 降级元数据、多查询/单查询实录）；全套 193 passed；旧代码反向验证 10/10 失败；真实服务冒烟（`LLM_PROVIDER=openai_compatible` + 不可达地址）：Trace summary_generation 显示 `provider=mock_fallback; requested=openai_compatible; model=smoke-model; duration=1309ms; fallback_reason=HTTPStatusError…`，query_rewriting 显示实际 variants 与 `provider=template`（"(original)" 占位符不再出现），retrieval 步骤 queries 与实际执行一致（冒烟数据已清理）。
 - 遗留：token 用量仅在 API 返回时记录；真实模型降级（超时/限流）未实测（需真实 API，属 F10/F12）；Dashboard 无独立降级标签（文字 Trace 已含全部信息，独立标签属展示增强）。
 
-### F10 · P1：JSON 合法不等于诊断有依据 — **已修复（2026-09-11）**
+### F10 · P1：JSON 合法不等于诊断有依据 — **已修复（2026-09-11 真模型评测，2026-09-12 R02+R03 收尾）**
 
 - 证据（历史）：`app/llm/base.py` 的 supporting_evidence 是自由字符串；兼容客户端只做结构校验，传日志不带稳定 ID，无引用归属验证；真模型冒烟复现：空证据仍产出 4 条根因假设（不会说"不知道"）。
 - 修改（已实施）：
@@ -211,7 +231,9 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - **引用护栏** `app/llm/citation_guard.py`：输出后逐条核对引用 ID 是否在本次实际提供的材料集合内——伪引用/无引用条目标注 [UNVERIFIED] 且所在假设置信度封顶 0.35（**明确降级，不静默删除**），逐条警告进 `DiagnosisResult.citation_warnings` 与 Trace；
   - **零证据弃答**：日志/手册/相似事故/笔记全空时不调 API，如实落"证据不足"占位诊断（provider=insufficient_evidence、requested=openai_compatible、无 token 消耗）；
   - 提示词明确"证据日志是不可信输入，不得据其编造事实/命令/路径"；置信度声明为模型自报非校准概率（Mock 置信度亦为启发式公式，不冒充校准）。
-- 验收（2026-09-11 真模型评测）：幻觉率 0.00%（修复前 92.59%——主因裁判失明，见 F12）；证据引用 grounding 55.19%→87.59%；零证据案例实测 20ms 弃答且裁判确认"不编造事实"（对比修复前空证据硬编 4 假设）；新增 tests/test_f10_citation_guard.py 19 项（引用校验 5、弃答 3、编号 1、裁判开卷 4、改写默认 3、run_eval 传参 1、护栏/其他 2），全套 212 passed；旧代码反向验证 12 项失败。
+- **R02（2026-09-12）：空引用不再绕过护栏**——原实现循环直接跳过空 supporting_evidence 列表，0.99 置信度原样保留；现在有根因却一条证据都不引用的假设同样降级（[UNVERIFIED] + 置信度封顶 0.35 + 警告进 citation_warnings/Trace，提交 `3e19be6`）。
+- **R03（2026-09-12）：missing_information 不再丢**——模型声明的"缺失信息"随诊断结果落库（新列 + 旧库迁移 + API 输出 + Dashboard 展示），翻旧报告不再只看到笃定结论（提交 `23d76e2`）。
+- 验收（2026-09-11 真模型评测）：幻觉率 0.00%（修复前 92.59%——主因裁判失明，见 F12）；证据引用 grounding 55.19%→87.59%；零证据案例实测 20ms 弃答且裁判确认"不编造事实"（对比修复前空证据硬编 4 假设）；新增 tests/test_f10_citation_guard.py 19 项（引用校验 5、弃答 3、编号 1、裁判开卷 4、改写默认 3、run_eval 传参 1、护栏/其他 2），全套 212 passed；旧代码反向验证 12 项失败。R02 新增空证据降级 2 项（单元 + 客户端端到端），全套 231 passed。
 - 遗留：弃答只在全部材料为空时触发（有检索材料时由引用护栏兜底）；矛盾日志保留替代假设未做专项拦截（多假设机制已保留，靠编号引用与降级约束）；[UNVERIFIED] 目前以文本形式呈现在支持证据里，Dashboard 无独立降级标签（展示增强）。
 
 ### F11 · P1：Runbook 质量短板已有数据
@@ -222,7 +244,7 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 验收：Top-1 ≥75% **达标**（88.89%）；Recall ≥85% **差 0.43 未达**（84.57%）。剩余 9 例失败中 4 例为规则/证据（范围外）、5 例检索失败（2 例跨类型硬过滤结构性排除 + 3 例稀疏词面排序/语义桥接限制），逐一有根因记录。
 - 工作量中到高（评测驱动迭代）；收益高（改善实际依据）。
 
-### F12 · P1：评测不足以支持“诊断准确率”结论 — **已修复（2026-09-11）**
+### F12 · P1：评测不足以支持“诊断准确率”结论 — **已修复（2026-09-11 真模型评测，2026-09-12 R05 口径收尾）**
 
 - 证据（历史）：`eval/run_eval.py` passed 组合类型、严重程度、关键词与来源召回；裁判提示词只传证据日志、不含检索资料——把合法检索引用（实存档案编号 HIST-TIMEOUT-001 等）误判为幻觉，真模型评测幻觉率 92.59% 主因即此测量缺陷；数据是模拟集。
 - 修改（已实施）：
@@ -231,6 +253,8 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - **查询改写默认模板**（评测驱动决策）：真模型下 LLM 改写使 Runbook Top-1 88.89%→81.48%，改为默认模板改写、显式 `QUERY_REWRITE_PROVIDER=llm` 才启用（detect_features 同步如实报告）；
   - 评测配置如实列明：tfidf 有效后端逐案例核对、模型 deepseek-chat（服务端回传 deepseek-flash）、语料与数据集版本写入报告。
 - 验收（2026-09-11 真模型评测，27 案例、真裁判 27/27 成功 0 降级）：幻觉率 92.59%（误判）→ 0.00%；证据引用 55.19%→87.59%；结论自洽 87.78%；建议有用度 76.30%（-6.7pp，如实记录）；检索指标修复后与 mock 基线一致（Top-1 88.89%、Recall 84.57%、失败 9 例同清单）；对比记录 `runtime/audit/eval-real-model-comparison-20260911.md`。新增裁判开卷测试 4 项，全套 212 passed；旧代码反向验证 12 项失败。
+- **R05（2026-09-12）：报告口径自证闭环**——① 报告新增 Evaluation Environment：eval_cases.json / runbooks/ / historical_incidents.json 的 SHA-256 指纹 + LLM provider/model 环境值（换数据/语料后旧报告与当前代码对不上，不能冒充新评测）；② 弃答（insufficient_evidence_count）、引用降级（citation_downgraded_case_count/warning_total）、token 成本（total_tokens）、后端分布（provider_distribution）进指标与逐案例实录（从 summary_generation Trace 解析）；③ 裁判幻觉指标改为 `judge_flagged_hallucination_count`（标记数/样本数）并写明"未检出≠幻觉率为 0"（小样本、同模型自评偏置）；④ 指标循环跳过 judge_* 键（全部归 LLM Judge Summary 一节）。Mock 27 例复测 Top-1 88.89%/Recall 84.57%/失败 9 与复核基线一致，无回归（提交 `2772f84`）。
+- 验收（R05）：新增 tests/test_r05_eval_report_scope.py 5 项（Trace 元数据解析×2、聚合计数、报告环境与新指标、裁判措辞），旧代码反向验证：模块收集失败（新函数不存在）；test_eval_harness 指标键集合按 F12 契约同步扩展；全套 231 passed。
 - 遗留：数据集仍为模拟集、标签人工复核有限；judge 与诊断同用 DeepSeek，自评偏置未量化——如需简历级结论可换异源裁判复测；actionability 的小幅下降归因于模型注意力转向引用（未逐案例细查）。
 
 ### F13 · P1：Dashboard 可显示错误事故或旧结果 — **已修复（2026-09-09）**
@@ -248,24 +272,25 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
 - 注：/events 为无限流，TestClient 无法消费（starlette 已知限制），快照逻辑以函数级测试覆盖 + 真实服务冒烟。
 - 剩余：SSE 每连接每秒一轮仍是轮询而非推送（本地单用户演示可接受）；真实 LLM 的 token 流不在本系统范围。
 
-### F15 · P1：反馈存在性未校验，正向过滤忽略正确性 — **部分完成（2026-09-09）**
+### F15 · P1：反馈存在性未校验，正向过滤忽略正确性 — **已修复（2026-09-10，2026-09-11 回归通过）**
 
 - 证据（历史）：`feedback_service.py:10` 曾直接 upsert；`app/database.py` 未启用 SQLite 外键检查；正向查询只看 rating，未看 is_diagnosis_correct。不存在 analysis ID 可写反馈（已复现）。
 - 修改（已实施）：`upsert_feedback` 服务层校验目标 AnalysisRun 存在、不存在返回 404；并发重复提交撞唯一约束时转为更新已有行（不再 500）；`list_positive_feedback` 正向 = 高评分且 `is_diagnosis_correct=True`。
 - 验收：新增 tests/test_feedback.py 4 项（404、upsert 收敛单行、5 星但判错不进正向、min_rating 边界），旧代码下反向验证 2 项判别测试失败；全套 92 passed。
 - 剩余（已解决，2026-09-10）：`app/database.py` 启用 SQLite 外键检查——`enable_sqlite_foreign_keys` 每连接执行 `PRAGMA foreign_keys=ON`（应用引擎接入，测试可对临时引擎复用）；`scan_foreign_key_orphans` 体检 9 类外键孤儿（运行库全 0，无孤儿）；开启后引用不存在父行的写入被数据库直接拒绝（服务层验票之外的兜底）。新增 tests/test_f15_foreign_keys.py 7 项，全套 147 passed；旧代码反向验证 7/7 失败。检索仍未接反馈数据（无实际污染，暂不接）。
 
-### F16 · 真实数据/共享部署前阻断：缺少身份边界 — **已修复（2026-09-10）**
+### F16 · 真实数据/共享部署前阻断：缺少身份边界 — **已修复（2026-09-10 门禁，2026-09-12 R04 带锁链路补齐）**
 
 - 证据（历史）：`app/api/routes.py` 日志写入、事故创建、分析触发、结果/事件读取无身份依赖，main 无身份中间件。缺少鉴权已确认；未部署公网或做攻击验证。
 - 修改（已实施）：
   - 可选门锁 `app/auth.py`：`AUTH_API_KEY` 未设置/空白 = 演示模式全开放（本地行为与历史完全一致）；设置后全部接口（含 /health 与页面）经路由级依赖要求 `X-API-Key`，`secrets.compare_digest` 比较（防时序猜测），失败 401 且信息不回显钥匙；
   - 请求保护中间件 `app/middleware.py`：`RequestSizeLimitMiddleware`（Content-Length 快速拒绝 + 按实际读取字节兜底，超限 413；默认 1MB，`MAX_REQUEST_BODY_BYTES` 可调，<=0 不限）与 `WriteRateLimitMiddleware`（每 IP 每分钟写入次数，滑动窗口 + 锁，超限 429 + Retry-After；默认 600，`WRITE_RATE_LIMIT_PER_MINUTE` 可调，<=0 不限；GET/HEAD/OPTIONS 不计），经 `apply_request_protection` 挂载；
   - `/features` 如实显示 `auth_enabled`/`request_size_limit_bytes`/`write_rate_limit_per_minute`（只报状态与限额，绝不输出钥匙）；README 增加"接真实数据前"小节。
-- 验收：新增 tests/test_f16_auth_and_limits.py 11 项（未设钥匙全开放、无/错钥匙 401、对钥匙 200、401/429 不回显钥匙、面板如实显示不泄钥匙、413 大小上限、429 频率上限 + Retry-After、读取不占额度、零值关闭限流）。全套 140 passed；旧代码反向验证 9/11 失败（2 过：演示模式全开放为锁定行为、旧代码全放行导致"对钥匙 200"必然通过，均记录）；真实服务冒烟通过（带锁启动：无钥匙 401、对钥匙 200、600 字节包对 300 限额 413、第三次写入 429 + retry-after 59、读取不受限、面板无钥匙泄漏，冒烟数据已清理）。
-- 遗留/边界：单把钥匙不分角色（多租户/RBAC 明确不做，基线原则）；限流状态在进程内存（重启清零、多 worker 各算各的）；不信任 X-Forwarded-For；被 413/401 拒绝的写入尝试同样计入频率额度（防刷按设计）；未做公网部署或攻击验证。
+- **R04（2026-09-12）：带锁整条链路补齐**——① 页面壳（/ 与 /dev-tools）移入无锁 `pages_router`：纯静态 HTML 不含数据，浏览器必须先拿到页面才能输入钥匙；数据/写入接口仍全部经带锁 router，门禁不弱化；② Dashboard 的 EventSource 无法带自定义请求头 → 改为 fetch 流式读取 SSE（断线 3 秒重连），401 时显示钥匙输入框，钥匙只存 sessionStorage 不发给第三方，分析/追踪请求同步带 X-API-Key；③ 开发工具页统一 api() 帮手携带钥匙（提交 `d46d339`）。
+- 验收：新增 tests/test_f16_auth_and_limits.py 11 项（未设钥匙全开放、无/错钥匙 401、对钥匙 200、401/429 不回显钥匙、面板如实显示不泄钥匙、413 大小上限、429 频率上限 + Retry-After、读取不占额度、零值关闭限流）。全套 140 passed；旧代码反向验证 9/11 失败（2 过：演示模式全开放为锁定行为、旧代码全放行导致"对钥匙 200"必然通过，均记录）；真实服务冒烟通过（带锁启动：无钥匙 401、对钥匙 200、600 字节包对 300 限额 413、第三次写入 429 + retry-after 59、读取不受限、面板无钥匙泄漏，冒烟数据已清理）。R04 新增 tests/test_r04_locked_chain.py 5 项（页面壳无钥匙 200/数据 401、带对钥匙放行、handler 带/不带 api_key 的请求头断言），旧代码反向验证 3/5 失败（2 过：门禁未弱化为锁定行为）；真实带锁服务冒烟（8011 + demo 库）：无钥匙页面壳 200/数据 401、带钥匙全通、错钥匙 401、handler 带钥匙 sent=1、无钥匙 dropped=1 + last_error=401 可观测；两模板 node --check 通过。**带锁浏览器实测待用户（8011，钥匙 demo-key-2026）。**
+- 遗留/边界：单把钥匙不分角色（多租户/RBAC 明确不做，基线原则）；限流状态在进程内存（重启清零、多 worker 各算各的）；不信任 X-Forwarded-For；被 413/401 拒绝的写入尝试同样计入频率额度（防刷按设计）；未做公网部署或攻击验证；**新发现（2026-09-12）**：FastAPI 自带 /docs 与 /openapi.json 不经过 router 依赖，上锁时仍开放（只见 schema 不见数据），本轮记录不动，如需封闭单独立项。
 
-### F17 · P2：配置、依赖与文档状态分散 — **已修复（2026-09-10）**
+### F17 · 配置、依赖与文档状态分散 — **已修复（2026-09-10 配置治理，2026-09-12 R01 初始化顺序收尾）**
 
 - 证据（历史）：各模块散读环境变量，有些导入时固定；默认依赖含重型检索包且部分开放下界；README 建议 `.env` 但普通命令不加载它，应用无 dotenv 调用；DESIGN 把已有异步任务、向量检索和反馈列为 Future Work。
 - 修改（已实施）：
@@ -274,7 +299,8 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - 检测阈值等请求配置仍按请求热读（行为不变，README 注明）；
   - requirements.txt 分组注释（基础/可选检索/测试）+ Python 3.11 记录 + venv 版本差异说明（sentence-transformers 3.3.1 vs venv 5.5.1、chromadb >=1.0.0 vs venv 1.5.9，本轮不升级不重钉）；DESIGN Future Work 校正（向量检索/异步任务/反馈已存在，指向基线）；
   - 实测：用户 .env 现真正生效（DATABASE_URL=incident-live.db、LLM_PROVIDER=openai_compatible）；该库已提前完成全部迁移（37 日志 received_at 回填、4 事故 source 全 automatic、类型回填 4/4、唯一索引安全创建、孤儿全 0）——下次普通启动即为迁移后状态。
-- 验收：新增 tests/test_f17_config_governance.py 8 项（默认合法、枚举/整数/浮点报错、openai_compatible 三件套、密钥不回显、坏配置 RuntimeError、.env 加载不覆盖已有变量）；全套 167 passed；旧代码反向验证：模块不存在收集失败（旧代码无此功能）；真实服务冒烟（坏配置启动即报清晰错误、好配置临时库启动 200 且 mock/tfidf 生效）。
+- **R01（2026-09-12）：加载时机修正**——`prepare_config()` 移到 `app/main.py` 模块最顶层、所有读配置的导入（app.database 创建 engine、embedding_service 固定重排开关）之前，create_app 内删除重复调用。修复前 .env 看似生效、实际 engine 与重排开关早已按默认值固定（提交 `b392571`）。
+- 验收：新增 tests/test_f17_config_governance.py 8 项（默认合法、枚举/整数/浮点报错、openai_compatible 三件套、密钥不回显、坏配置 RuntimeError、.env 加载不覆盖已有变量）；全套 167 passed；旧代码反向验证：模块不存在收集失败（旧代码无此功能）；真实服务冒烟（坏配置启动即报清晰错误、好配置临时库启动 200 且 mock/tfidf 生效）。R01 新增独立子进程验收 2 项（临时目录起子进程 import app.main：断言 engine_url 与 cross_encoder 按 .env 初始化、导出变量优先于 .env），旧代码下 2/2 失败（environment 显示与实际运行不一致），全套 231 passed。
 
 ### F18 · P2：日志接入会等待网络 — **已修复（2026-09-10）**
 
@@ -285,9 +311,12 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   - `stats()` 观测：queued/sent/dropped/last_error（丢弃可观测）；
   - 服务 id 解析移到后台线程并缓存（业务线程零网络调用）；
   - `async_mode=False` 保留同步旧行为；两个 Demo（demo_automatic_incident、demo_shop_system）显式同步模式（短生命周期/历史行为不变）。
-- 验收：新增 tests/test_f18_logging_handler.py 8 项（MockTransport 注入：慢平台 emit<0.1s 而同步需 0.9s+、原始 timestamp 送达、队列溢出丢弃计数、平台不可用不阻塞且 dropped/last_error 可观测、close 排空 4/4、服务解析一次、同步模式立即送达、同步失败吞掉并计数）；全套 175 passed；旧代码反向验证 8/8 失败。
+  - **R04（2026-09-12）**：新增 `api_key: str | None = None` 参数——平台带锁（AUTH_API_KEY）时业务侧传同一把钥匙，`_make_client` 给复用连接统一带 `X-API-Key`；不带钥匙连带锁平台 = 日志被 401 全部拒收（丢弃可经 `stats().last_error` 观测），如实标注。
+- 验收：新增 tests/test_f18_logging_handler.py 8 项（MockTransport 注入：慢平台 emit<0.1s 而同步需 0.9s+、原始 timestamp 送达、队列溢出丢弃计数、平台不可用不阻塞且 dropped/last_error 可观测、close 排空 4/4、服务解析一次、同步模式立即送达、同步失败吞掉并计数）；全套 175 passed；旧代码反向验证 8/8 失败。R04 增补 tests/test_r04_locked_chain.py 2 项（带/不带 api_key 的请求头断言），全套 231 passed。
 
 ## 6. AI 执行链十二层审计
+
+下表为 2026-09-08 的历史诊断快照，不代表各层当前仍有同样缺陷。当前已落实项和新发现以第 0 节及复核附件为准。
 
 | 层 | 当前判断 | 动作 |
 |---|---|---|
@@ -380,7 +409,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 
 工程师台 `http://127.0.0.1:8010`，业务 Demo `http://127.0.0.1:8020`。端口占用先确认服务，再换端口并同步 INCIDENT_API_URL；不要清数据库或停止不明进程。
 
-应用读进程环境变量。仅创建 `.env` 不会使普通启动命令加载它；选择文件方式需显式加载，例如支持依赖已安装时用 uvicorn `--env-file .env`。不要在报告展示文件内容。
+应用在 `app/main.py` 模块顶层（先于数据库 engine 与重排开关等读配置的导入）调用 `prepare_config()` 加载 `.env`（R01，2026-09-12 修复了加载晚于初始化的时序问题）。仍建议核对实际生效配置：以 `/features` 显示与数据库路径为准；不要因 os.environ 已变化就认为 engine 已切换，不要在报告展示密钥。
 
 ## 9. 防止过度新增与偏离方向
 
@@ -393,9 +422,13 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 - 保持 FastAPI + SQLAlchemy + SQLite 原型架构，实际并发/任务/部署需求证明必要时再迁移设施。
 - 用户批准新方向可以改变计划，每次记录原因、影响、验收和回退，不依赖聊天上下文记忆。
 
-通过根目录 `AGENTS.md` 提醒支持该文件的编码助手先读，README 提供人工入口。**未添加启动钩子，业务程序不会自动阅读 Markdown，也不能保证不支持 AGENTS.md 的工具执行。** 换工具时手动要求先读本文件。
+根目录 `AGENTS.md` 为支持该约定的助手提供入口；`CLAUDE.md` 通过 `@AGENTS.md` 和 `@docs/PROJECT_BASELINE.md` 导入同一套规则与基线，供 Claude Code 新会话加载；README 提供人工入口。Claude Code 已打开的会话应明确要求重新读取，下一次在本仓库启动后可用 `/context` 检查 Memory files。**这些是上下文指引，不是强制执行器；业务程序不会自动阅读 Markdown。**
 
 ## 10. 决策与交接记录
+
+**2026-09-11 Claude Code 入口补齐：** 用户说明主要使用 Claude Code。检查发现根目录和 `.claude/` 均无 CLAUDE.md；新增根目录导入文件，共用 AGENTS 与本基线，不复制计划。按 Claude Code 官方文档核对导入语法并检查本地目标存在；尚未在用户的 Claude Code 会话内确认实际加载。
+
+**2026-09-11 最新复核：** 基于 f2e9c42 重新运行 212 项测试与 27 例 Mock Eval，并隔离复现配置时序、空引用、missing_information 丢失和带锁页面无凭据问题。重开/调整 F06/F10/F12/F16/F17，当前状态见第 0 节。未修改业务代码。以下表格保留此前记录，其中“全部收工”为当时判断，已被本次复核修正。
 
 | 日期 | 完成/决策 | 原因与验证 | 下一步 |
 |---|---|---|---|
@@ -418,6 +451,7 @@ $env:INCIDENT_API_URL = 'http://127.0.0.1:8010'
 | 2026-09-11 | F09 + F08（用户授权全自主推进）：F09 降级元数据与 Trace 实录（DiagnosisResult 五字段结构化执行元数据、降级客户端记录请求后端/异常摘要/耗时、OpenAI 回传 model/usage、计时 sink 入口清空 + 检索器实例级隔离、pipeline_meta 实录改写 provider/变体/实际查询、Trace 四步骤按实际执行，"(original)" 占位符消除）；F08 索引新鲜度（语料签名 SHA-256 写入集合元数据、数量+签名全一致才复用、先嵌入再 delete+add 替换、嵌入失败旧索引原样可用、空语料清空、freshness_status() 只读体检、build_vector_index.py --check 陈旧退出码 1） | 新增 tests/test_f09_trace_and_fallback.py 10 项 + tests/test_f08_index_freshness.py 8 项；全套 193 passed；旧代码反向验证 17/18 失败（1 过：数量变化重建为旧行为锁定项）；真实服务冒烟（F09：不可达后端 Trace 显示 provider=mock_fallback、requested=openai_compatible、model=smoke-model、duration=1309ms、fallback_reason=HTTPStatusError…502；F08：真实 ChromaDB 旧索引 stale(not_signed) exit 1 → --force 重建 244 chunks/34 incidents → fresh exit 0；冒烟数据已清理） | F08/F09 标记已修复；**P1 可自主完成项全部收工**；剩余 P1：F10 端到端证据契约 + F12 指标缺口（需真实 API 评测）、F11 Recall 84.57% 差 0.43（剩余 5 例已归因，hard 过滤为消融裁决保留）、F13/F14 浏览器实测（需用户配合） |
 | 2026-09-11 | F13/F14 浏览器实测收尾（用户配合，隔离临时库 + 端口 8000）：Dashboard 快速切换两个事故诊断不串、SSE 实时更新（3 事故 3 分析全部自动呈现）、统计卡数字与库一致；实测发现两处 UX 问题并修复——① 开发工具页创建服务后下拉框不自动选中新服务、发送日志不提示发到哪（用户日志曾误发到 checkout-api，被 F03 去重合并，暴露于实测）；② Dashboard 服务行不可点、无事故时右栏残留旧诊断——补服务筛选（点击服务只看该服务事故/任务/日志，再点取消；筛选标签与空态提示，右栏同步清空） | 两模板 node --check 通过；全套 193 passed（后端无影响）；用户浏览器复测通过：切换/筛选/取消/空态/开发工具页自动选中与发送提示全部正常，第三事故（inventory-api）经新流程成功自动立案并完成分析（冒烟数据已清理） | F13/F14 标记浏览器实测完成；**P1 可自主完成项 + 浏览器实测全部收工**；剩余 P1 均依赖外部条件：F10/F12 真实 API 评测、F11 Recall 差 0.43 |
 | 2026-09-11 | F10 + F12 真模型评测与防胡说（用户确认计划，DeepSeek 真模型 + 真裁判）：裁判开卷资料（judge 全链路传检索手册/相似事故，合法检索引用不再被误判）；证据稳定编号 [E#]/[N#]/[R#]/[S#] + 引用护栏 citation_guard（伪引用/无引用条目标注 [UNVERIFIED] + 所在假设置信度封顶 0.35 + 警告进 DiagnosisResult 与 Trace）；零证据弃答（材料全空不调 API，provider=insufficient_evidence）；查询改写默认模板（真模型下 LLM 改写使 Top-1 88.89%→81.48%，显式 QUERY_REWRITE_PROVIDER=llm 才启用）；missing_information 字段区分事实/假设/缺失信息 | 新增 tests/test_f10_citation_guard.py 19 项；全套 212 passed；旧代码反向验证 12 项失败；真模型 27 案例复测：幻觉率 92.59%→0.00%、证据引用 55.19%→87.59%、Top-1 81.48%→88.89%、失败 11→9、平均耗时 6895ms→4678ms、零证据案例 20ms 弃答且裁判确认不编造；对比记录 runtime/audit/eval-real-model-comparison-20260911.md | F10/F12 标记已修复；**P0/P1 全部收工（代码 + 浏览器实测 + 真模型评测）**；剩余非代码项：F11 Recall 84.57% 差 0.43（改进需动语料/嵌入，待用户决定）、推送代码（待用户拍板）、简历撰写（真实评测数据已齐） |
+| 2026-09-12 | **本轮复核六项修复（用户批准五步计划）**：R01/F17 初始化顺序——`prepare_config()` 移到 app/main.py 模块顶层、先于 database/embedding 导入（旧代码 .env 加载晚于 engine 与重排开关固定，环境显示与实际运行不一致）；R02/F10 空证据门禁——citation_guard 对空 supporting_evidence 列表同样拦截（旧代码空引用保留 0.99 置信度且无警告）；R03/F06+F10 持久化——AnalysisRun 新增 missing_information / investigation_notes / final_evidence_log_ids 三个 JSON 列（迁移 + schema + Dashboard 展示），Agent keyword_matches 并入证据集合（旧代码缺失信息落库/API 丢失、证据引用不持久）；R04/F16+F18 带锁链路——页面壳移入无锁 pages_router（静态壳不弱化数据门禁）、Dashboard EventSource 换 fetch 流式 SSE + sessionStorage 钥匙输入（401 提示）、开发工具页统一 api() 携带钥匙、logging handler 增 api_key 参数（旧代码自带页面/handler 在带锁平台全被 401）；R05/F12 评测口径——报告写入数据集/语料 SHA-256 指纹与模型环境、弃答/引用降级/token 成本/provider 分布进指标与逐案例实录、裁判幻觉标记改为"标记数/样本数"并注明未检出≠幻觉率为 0（旧报告数据来源无法自证、裁判措辞绝对化） | 新增 tests/test_f17 子进程 2 项 + test_f10_citation_guard 3 项 + test_f06 持久化 5 项 + test_r04_locked_chain 5 项 + test_r05_eval_report_scope 5 项，全套 231 passed；旧代码反向验证 22/25 失败（3 过均为锁定行为项，记录在案）；R04 真实带锁服务冒烟（8011 + demo 库：页面壳 200/数据 401、带钥匙全通、handler 带钥匙 sent=1/无钥匙 dropped+401 可观测）；R05 mock 评测冒烟：Top-1 88.89%/Recall 84.57%/失败 9 例与基线一致、环境指纹如实打印；五笔主题提交 b392571/3e19be6/23d76e2/d46d339/2772f84 | 五问题全部标记已修复；新发现记录为边界不动：FastAPI 自带 /docs 与 /openapi.json 上锁时仍开放（只见 schema 不见数据）；F11 Recall 差 0.43 维持（动语料/嵌入待用户决定）；**带锁浏览器实测待用户（8011，钥匙 demo-key-2026）** |
 
 每次工作更新此模板，不另建竞争性总计划：
 
