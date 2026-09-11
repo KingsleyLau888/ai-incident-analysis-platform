@@ -74,3 +74,7 @@ class AnalysisRunRead(BeijingTimeMixin, BaseModel):
     root_cause_hypotheses: list[RootCauseHypothesisRead] = []
     impact_scope: str = ""
     structured_suggested_actions: list[str] = []
+    # R03：模型声明的不确定信息 + 交给模型的上下文快照（E#/N# 编号映射）
+    missing_information: list[str] = []
+    investigation_notes: list[str] = []
+    final_evidence_log_ids: list[int] = []

@@ -123,6 +123,8 @@ function renderAnalysis(a){
       <div class="section"><h3>影响范围</h3><p>${esc(a.impact_scope)}</p><h3>建议操作</h3><ol class="actions">${(a.structured_suggested_actions||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>
     </div>
     <div class="section"><h3>证据日志</h3>${(a.evidence_logs||[]).map(x=>`<div class="item">${esc(x.log_entry.message)}</div>`).join('')||'<p class="muted">无证据日志</p>'}</div>
+    <div class="section"><h3>缺失信息（模型声明还不确定的部分）</h3>${(a.missing_information||[]).length?(a.missing_information.map(x=>`<div class="item">${esc(x)}</div>`).join('')):'<p class="muted">无（模型未声明缺失信息）</p>'}</div>
+    ${(a.investigation_notes||[]).length?`<div class="section"><h3>调查笔记</h3>${a.investigation_notes.map(x=>`<div class="item">${esc(x)}</div>`).join('')}</div>`:''}
     <div class="grid2">
       <div class="section"><h3>Runbook 检索依据</h3>${runbooks||'<p class="muted">无 Runbook 结果</p>'}</div>
       <div class="section"><h3>相似历史事故</h3>${similar||'<p class="muted">无相似事故</p>'}</div>

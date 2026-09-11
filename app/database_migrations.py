@@ -16,6 +16,10 @@ ANALYSIS_RUN_COLUMNS = {
     "root_cause_hypotheses": "JSON NOT NULL DEFAULT '[]'",
     "impact_scope": "TEXT NOT NULL DEFAULT ''",
     "structured_suggested_actions": "JSON NOT NULL DEFAULT '[]'",
+    # R03（2026-09-11 复核）：模型声明的不确定信息 + 最终上下文快照
+    "missing_information": "JSON NOT NULL DEFAULT '[]'",
+    "investigation_notes": "JSON NOT NULL DEFAULT '[]'",
+    "final_evidence_log_ids": "JSON NOT NULL DEFAULT '[]'",
 }
 
 

@@ -34,6 +34,19 @@ class AnalysisRun(Base):
     _structured_suggested_actions: Mapped[list[str]] = mapped_column(
         "structured_suggested_actions", JSON, default=list
     )
+    # R03（2026-09-11 复核）：模型声明"还不确定/缺失的信息"必须随结果落库，
+    # 不能让用户翻旧报告时只看到笃定的结论。
+    _missing_information: Mapped[list[str]] = mapped_column(
+        "missing_information", JSON, default=list
+    )
+    # 实际交给诊断模型的上下文快照：调查笔记（N# 编号按此顺序）与最终证据
+    # 日志 ID 列表（E# 编号按此顺序），重载后仍可按编号还原所有材料。
+    _investigation_notes: Mapped[list[str]] = mapped_column(
+        "investigation_notes", JSON, default=list
+    )
+    _final_evidence_log_ids: Mapped[list[int]] = mapped_column(
+        "final_evidence_log_ids", JSON, default=list
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     incident: Mapped["Incident"] = relationship(back_populates="analysis_runs")
@@ -80,17 +93,41 @@ class AnalysisRun(Base):
     def structured_suggested_actions(self) -> list[str]:
         return self._structured_suggested_actions or []
 
+    @property
+    def missing_information(self) -> list[str]:
+        return self._missing_information or []
+
+    @property
+    def investigation_notes(self) -> list[str]:
+        return self._investigation_notes or []
+
+    @property
+    def final_evidence_log_ids(self) -> list[int]:
+        return self._final_evidence_log_ids or []
+
     def set_structured_diagnosis(
         self,
         diagnosis_summary: str,
         root_cause_hypotheses: list[dict],
         impact_scope: str,
         structured_suggested_actions: list[str],
+        missing_information: list[str],
     ) -> None:
         self._diagnosis_summary = diagnosis_summary
         self._root_cause_hypotheses = root_cause_hypotheses
         self._impact_scope = impact_scope
         self._structured_suggested_actions = structured_suggested_actions
+        self._missing_information = missing_information
+
+    def set_investigation_context(
+        self,
+        investigation_notes: list[str],
+        final_evidence_log_ids: list[int],
+    ) -> None:
+        """记录实际交给诊断模型的上下文快照（R03）：笔记与证据日志的最终
+        顺序即 [N#]/[E#] 编号映射，重载后可按编号还原所有材料。"""
+        self._investigation_notes = investigation_notes
+        self._final_evidence_log_ids = final_evidence_log_ids
 
 
 class IncidentEvidence(Base):

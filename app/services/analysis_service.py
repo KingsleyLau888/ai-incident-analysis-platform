@@ -251,6 +251,17 @@ def analyze_incident(
     )
     summary = f"Detected {detection.issue_type} in {service_name} based on related error logs."
 
+    # R03：记录实际交给诊断模型的上下文快照——最终证据日志顺序即 [E#]
+    # 编号映射、调查笔记顺序即 [N#] 编号映射；Agent 追加的关键词命中日志
+    # 从此与规则证据一样可追溯（F06 端到端收尾）。
+    if react_result is not None:
+        final_context = react_result.final_context or {}
+        final_evidence_logs = _merged_agent_evidence(final_context, detection)
+        investigation_notes = list(final_context.get("investigation_notes", []))
+    else:
+        final_evidence_logs = list(detection.evidence_logs)
+        investigation_notes = []
+
     analysis_run = AnalysisRun(
         incident_id=incident.id,
         issue_type=detection.issue_type,
@@ -274,18 +285,28 @@ def analyze_incident(
         ],
         impact_scope=structured_diagnosis.impact_scope,
         structured_suggested_actions=structured_diagnosis.structured_suggested_actions,
+        missing_information=structured_diagnosis.missing_information,
+    )
+    analysis_run.set_investigation_context(
+        investigation_notes=investigation_notes,
+        final_evidence_log_ids=[log.id for log in final_evidence_logs],
     )
     db.add(analysis_run)
     db.flush()
     # 注意：此处不发进度消息。结果、证据、Trace 必须一次提交（原子性），
     # 进度回调内部会 commit，若在此处发消息会提前提交半成品 AnalysisRun（F01）。
 
-    for log in detection.evidence_logs:
+    rule_ids = {log.id for log in detection.evidence_logs}
+    for log in final_evidence_logs:
         db.add(
             IncidentEvidence(
                 analysis_run_id=analysis_run.id,
                 log_entry_id=log.id,
-                reason=f"Matched {detection.issue_type} rule.",
+                reason=(
+                    f"Matched {detection.issue_type} rule."
+                    if log.id in rule_ids
+                    else "Agent keyword search match."
+                ),
             )
         )
 
@@ -317,6 +338,11 @@ def analyze_incident(
             ],
             impact_scope=structured_diagnosis.impact_scope,
             structured_suggested_actions=structured_diagnosis.structured_suggested_actions,
+            missing_information=structured_diagnosis.missing_information,
+        )
+        saved_analysis_run.set_investigation_context(
+            investigation_notes=investigation_notes,
+            final_evidence_log_ids=[log.id for log in final_evidence_logs],
         )
     return saved_analysis_run
 
@@ -513,6 +539,20 @@ def _agent_allowed() -> bool:
     return _requested_analysis_mode() in {"auto", "agent"}
 
 
+def _merged_agent_evidence(ctx: dict, detection) -> list:
+    """F06：关键词命中的日志按 log id 去重并入最终证据。
+
+    与 Agent 内部 generate_diagnosis_fn 使用同一合并逻辑，保证持久化的
+    [E#] 编号映射与实际交给模型的证据列表一致（R03）。
+    """
+    evidence_logs = list(ctx.get("evidence_logs") or detection.evidence_logs)
+    matched = {getattr(log, "id", None): log for log in ctx.get("keyword_matches", [])}
+    for log in evidence_logs:
+        matched.pop(getattr(log, "id", None), None)
+    evidence_logs.extend(matched.values())
+    return evidence_logs
+
+
 def _run_react_agent(
     incident, service_name, detection, logs,
     runbook_retriever, similar_incident_retriever, llm_client,
@@ -533,11 +573,7 @@ def _run_react_agent(
     def generate_diagnosis_fn(ctx):
         # F06：原始日志（带真实 log id）与派生观察分型，不再把调查笔记
         # 伪装成 id=0 的日志混进证据；关键词命中的日志按 id 去重并入证据
-        evidence_logs = list(ctx.get("evidence_logs") or detection.evidence_logs)
-        matched = {getattr(log, "id", None): log for log in ctx.get("keyword_matches", [])}
-        for log in evidence_logs:
-            matched.pop(getattr(log, "id", None), None)
-        evidence_logs.extend(matched.values())
+        evidence_logs = _merged_agent_evidence(ctx, detection)
         return get_llm_client().diagnose(
             incident_title=incident.title, service_name=service_name,
             issue_type=ctx.get("issue_type", detection.issue_type),
