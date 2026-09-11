@@ -85,7 +85,7 @@ def run_eval(
             "cases": case_results,
             "failed_cases": [result for result in case_results if not result["passed"]],
             # F12：评测口径自证——换数据集/语料/模型后指纹与配置必变
-            "environment": _evaluation_environment(),
+            "environment": _evaluation_environment(cases_path),
         }
         write_report(report, report_path)
         return report
@@ -155,10 +155,15 @@ def _sha256_corpus(directory: Path) -> str | None:
     return digest.hexdigest()[:16]
 
 
-def _evaluation_environment() -> dict:
-    """报告自证口径：数据集/语料指纹 + 环境配置，防止旧报告冒充新评测。"""
+def _evaluation_environment(cases_path: Path = DEFAULT_CASES_PATH) -> dict:
+    """报告自证口径：数据集/语料指纹 + 环境配置，防止旧报告冒充新评测。
+
+    指纹按实际评测用到的 cases_path 计算——自定义数据集必须如实记录
+    自己的文件名与指纹，不能写成默认文件（R05 收尾，2026-09-12）。
+    """
     return {
-        "dataset_sha256": _sha256_file(DEFAULT_CASES_PATH),
+        "dataset_name": cases_path.name,
+        "dataset_sha256": _sha256_file(cases_path),
         "runbook_corpus_sha256": _sha256_corpus(PROJECT_ROOT / "runbooks"),
         "historical_incidents_sha256": _sha256_file(
             PROJECT_ROOT / "data" / "historical_incidents.json"
@@ -205,6 +210,24 @@ def _summary_metadata(analysis) -> dict:
     return metadata
 
 
+def _format_metric_value(name: str, value) -> str:
+    """指标统一格式化，CLI 与 Markdown 报告共用（R05 收尾，2026-09-12）。
+
+    按类型而非名字判断：比率（float）→ 百分比；平均耗时 → 毫秒小数；
+    整数计数 → 原样；字典（如 provider_distribution）→ k=v 列表。
+    旧实现只按名字特判，字典与新增整数计数被误按百分比格式化。
+    """
+    if name == "average_latency_ms":
+        return f"{value:.2f}"
+    if isinstance(value, dict):
+        return ", ".join(f"{k}={v}" for k, v in sorted(value.items()))
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.2%}"
+    return str(value)
+
+
 def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -225,7 +248,8 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
         lines.extend(["## Evaluation Environment (评测口径自证)", ""])
         if environment.get("dataset_sha256"):
             lines.append(
-                f"- dataset: eval_cases.json sha256={environment['dataset_sha256']}"
+                f"- dataset: {environment.get('dataset_name', 'eval_cases.json')} "
+                f"sha256={environment['dataset_sha256']}"
             )
         if environment.get("runbook_corpus_sha256"):
             lines.append(
@@ -249,22 +273,20 @@ def write_report(report: dict, path: Path = DEFAULT_REPORT_PATH) -> None:
 
     lines.extend(["## Metrics", ""])
     for name, value in report["metrics"].items():
-        if name == "average_latency_ms":
-            lines.append(f"- {name}: {value:.2f}")
-        elif name in {
-            "failed_case_count",
-            "insufficient_evidence_count",
-            "citation_downgraded_case_count",
-            "citation_warning_total",
-            "total_tokens",
-        }:
-            lines.append(f"- {name}: {value}")
-        elif name == "provider_distribution":
+        if name == "provider_distribution":
             continue  # 单独成行，避免 dict 被当百分比格式化
         elif name.startswith("judge_"):
             continue  # judge 指标在 LLM Judge Summary 一节完整呈现
+        elif name == "total_tokens" and report["metrics"].get("token_usage_covered_case_count") is not None:
+            # R05 收尾：token 只统计最终诊断调用回传的 usage，不是全流程
+            # 成本；覆盖数不足样本数时明确是"部分统计"，0 不代表零成本
+            lines.append(
+                f"- total_tokens: {value}（仅统计最终诊断调用回传的 usage，"
+                f"覆盖 {report['metrics']['token_usage_covered_case_count']}/"
+                f"{report['total_cases']} 个案例，非全流程成本）"
+            )
         else:
-            lines.append(f"- {name}: {value:.2%}")
+            lines.append(f"- {name}: {_format_metric_value(name, value)}")
     provider_distribution = report["metrics"].get("provider_distribution")
     if provider_distribution:
         lines.append(
@@ -623,6 +645,9 @@ def _aggregate_metrics(results: list[dict]) -> dict:
         if result.get("token_usage_total")
     ]
     metrics["total_tokens"] = sum(token_totals) if token_totals else 0
+    # R05 收尾：覆盖数用于区分"确实为零"与"未统计"——Mock 无 usage 时
+    # total_tokens=0 是部分统计，不能当作真实模型成本为零
+    metrics["token_usage_covered_case_count"] = len(token_totals)
     provider_counts: dict[str, int] = {}
     for result in results:
         provider = result.get("provider", "unknown")
@@ -770,12 +795,9 @@ def main() -> None:
     else:
         print("judge: disabled")
     for name, value in report["metrics"].items():
-        if name == "average_latency_ms":
-            print(f"{name}: {value:.2f}")
-        elif name == "failed_case_count":
-            print(f"{name}: {value}")
-        else:
-            print(f"{name}: {value:.2%}")
+        if name.startswith("judge_"):
+            continue  # judge 指标以报告 LLM Judge Summary 为准，命令行只报概览
+        print(f"{name}: {_format_metric_value(name, value)}")
     print(f"Wrote report to {DEFAULT_REPORT_PATH}")
 
 

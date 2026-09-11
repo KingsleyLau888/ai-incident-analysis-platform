@@ -118,6 +118,8 @@ def test_aggregate_metrics_counts_insufficient_citations_and_tokens():
     assert metrics["citation_downgraded_case_count"] == 2
     assert metrics["citation_warning_total"] == 4
     assert metrics["total_tokens"] == 150
+    # R05 收尾：覆盖数区分"确实为零"与"未统计"（部分统计口径）
+    assert metrics["token_usage_covered_case_count"] == 2
     assert metrics["provider_distribution"] == {"insufficient_evidence": 1, "mock": 2}
 
 
@@ -137,6 +139,7 @@ def test_write_report_includes_environment_and_new_metrics(tmp_path):
             "citation_downgraded_case_count": 1,
             "citation_warning_total": 3,
             "total_tokens": 123,
+            "token_usage_covered_case_count": 2,
             "provider_distribution": {"mock": 2},
         },
         "cases": [
@@ -169,6 +172,9 @@ def test_write_report_includes_environment_and_new_metrics(tmp_path):
     assert "insufficient_evidence_count: 1" in text
     assert "citation_downgraded_case_count: 1" in text
     assert "total_tokens: 123" in text
+    # R05 收尾：token 只统计最终诊断调用，报告必须写明"部分统计"口径
+    assert "仅统计最终诊断调用回传的 usage" in text
+    assert "覆盖 2/2 个案例" in text
     assert "provider_distribution: mock=2" in text
     # 逐案例实录：引用降级与 token 成本
     assert "citation_warnings: 3" in text

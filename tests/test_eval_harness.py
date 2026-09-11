@@ -68,6 +68,8 @@ def test_run_eval_generates_metrics_and_report(tmp_path, monkeypatch):
         "citation_downgraded_case_count",
         "citation_warning_total",
         "total_tokens",
+        # R05 收尾：token 覆盖数（区分部分统计与未统计）
+        "token_usage_covered_case_count",
         "provider_distribution",
     }
     assert report_path.exists()
