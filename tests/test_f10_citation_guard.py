@@ -117,6 +117,18 @@ def test_verify_handles_empty_materials_and_hypotheses():
     assert warnings == []
 
 
+def test_verify_downgrades_hypothesis_with_no_supporting_evidence():
+    # R02：有根因但 supporting_evidence=[] —— 原实现直接跳过，0.99 原样保留；
+    # 合法弃答（零假设）由上方 empty_hypotheses 用例锁定，两者分开处理。
+    diagnosis = _diagnosis([_hypothesis([], confidence=0.99)])
+    cleaned, warnings = verify_and_downgrade(diagnosis, evidence_count=3)
+
+    hypothesis = cleaned.root_cause_hypotheses[0]
+    assert hypothesis.supporting_evidence == ["[UNVERIFIED] (no supporting evidence)"]
+    assert hypothesis.confidence == UNVERIFIED_CONFIDENCE_CAP
+    assert any("no supporting evidence" in warning for warning in warnings)
+
+
 # ── 客户端弃答 ───────────────────────────────────────────────────────
 
 def test_client_abstains_when_all_inputs_empty():
@@ -288,6 +300,40 @@ def test_fabricated_citation_downgraded_and_recorded_in_warnings():
     assert any("[UNVERIFIED]" in entry for entry in hypothesis.supporting_evidence)
     assert result.citation_warnings and any(
         "unknown id E3" in warning for warning in result.citation_warnings
+    )
+
+
+def test_client_downgrades_empty_evidence_hypothesis_end_to_end():
+    # R02：模型返回"有假设、零证据" → 客户端经护栏降级并记录警告
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = {
+            "diagnosis_summary": "ok",
+            "root_cause_hypotheses": [
+                {"cause": "c", "confidence": 0.99, "supporting_evidence": []}
+            ],
+            "impact_scope": "svc",
+            "structured_suggested_actions": ["check"],
+        }
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(content)}}]}
+        )
+
+    client = _llm_client(handler)
+    result = client.diagnose(
+        incident_title="t",
+        service_name="s",
+        issue_type="database_issue",
+        severity="high",
+        evidence_logs=[_Log("timeout")],
+        retrieved_runbook_chunks=[],
+        similar_incidents=[],
+    )
+
+    hypothesis = result.diagnosis.root_cause_hypotheses[0]
+    assert hypothesis.confidence == UNVERIFIED_CONFIDENCE_CAP
+    assert hypothesis.supporting_evidence == ["[UNVERIFIED] (no supporting evidence)"]
+    assert result.citation_warnings and any(
+        "no supporting evidence" in warning for warning in result.citation_warnings
     )
 
 

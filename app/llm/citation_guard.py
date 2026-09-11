@@ -5,7 +5,8 @@
 逐条核对 ID 是否在本次请求实际提供的材料集合内：
 
 - 引用全部真实 → 原样保留；
-- 引用不存在的 ID，或整条没有任何引用 ID → 该条目标注 [UNVERIFIED]，
+- 引用不存在的 ID、整条没有任何引用 ID，或假设一条支持证据都没有
+  （supporting_evidence 为空）→ 该条目/假设标注 [UNVERIFIED]，
   且所在假设的置信度封顶 0.35（明确降级，不静默删除）；
 - 降级逐条记录为警告，随 DiagnosisResult 进入 Trace（可观测）。
 
@@ -67,17 +68,23 @@ def verify_and_downgrade(
     for index, hypothesis in enumerate(diagnosis.root_cause_hypotheses, start=1):
         entries = []
         unverified_reasons = []
-        for entry in hypothesis.supporting_evidence:
-            cited = {f"{kind}{num}" for kind, num in _CITATION_RE.findall(entry)}
-            unknown = cited - valid
-            if not cited:
-                unverified_reasons.append("no citation id")
-                entries.append(f"[UNVERIFIED] {entry}")
-            elif unknown:
-                unverified_reasons.append("unknown id " + ", ".join(sorted(unknown)))
-                entries.append(f"[UNVERIFIED] {entry}")
-            else:
-                entries.append(entry)
+        if not hypothesis.supporting_evidence:
+            # R02（2026-09-11 复核）：有根因但一条证据都不引用——原实现
+            # 循环直接跳过空列表，0.99 置信度原样保留；现在同样降级。
+            unverified_reasons.append("no supporting evidence")
+            entries.append("[UNVERIFIED] (no supporting evidence)")
+        else:
+            for entry in hypothesis.supporting_evidence:
+                cited = {f"{kind}{num}" for kind, num in _CITATION_RE.findall(entry)}
+                unknown = cited - valid
+                if not cited:
+                    unverified_reasons.append("no citation id")
+                    entries.append(f"[UNVERIFIED] {entry}")
+                elif unknown:
+                    unverified_reasons.append("unknown id " + ", ".join(sorted(unknown)))
+                    entries.append(f"[UNVERIFIED] {entry}")
+                else:
+                    entries.append(entry)
 
         confidence = hypothesis.confidence
         if unverified_reasons:
