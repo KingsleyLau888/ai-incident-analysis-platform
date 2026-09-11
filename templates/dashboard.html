@@ -38,8 +38,8 @@ main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template
   </section>
   <section class="layout">
     <div class="left">
-      <div class="panel"><h2>服务状态</h2><div id="services" class="list"></div></div>
-      <div class="panel"><h2>实时 Incident</h2><div id="incidents" class="list"></div></div>
+      <div class="panel"><h2>服务状态（点击筛选，再点一次取消）</h2><div id="services" class="list"></div></div>
+      <div class="panel"><div class="toolbar"><h2>实时 Incident</h2><span id="incident-filter" class="badge"></span></div><div id="incidents" class="list"></div></div>
       <div class="panel"><h2>Analysis Jobs</h2><div id="jobs" class="list"></div></div>
       <div class="panel"><div class="toolbar"><h2>实时日志</h2><span id="log-count" class="badge">0</span></div><div id="logs" class="logs"></div></div>
     </div>
@@ -52,7 +52,7 @@ main{padding:18px 24px;display:grid;gap:16px}.metrics{display:grid;grid-template
   </section>
 </main>
 <script>
-const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,loadedAnalysis:null,loadedAnalysisFor:null,analysisLoading:false};
+const state={services:[],incidents:[],logs:[],jobs:[],selectedIncident:null,selectedService:null,loadedAnalysis:null,loadedAnalysisFor:null,analysisLoading:false};
 let analysisSeq=0; // 请求编号：响应对不上号即过期，丢弃（F13）
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const tm=v=>v?new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'';
@@ -65,13 +65,20 @@ function render(){
   document.querySelector('#m-errors').textContent=state.logs.filter(x=>['ERROR','CRITICAL'].includes(x.level.toUpperCase())).length;
   document.querySelector('#m-incidents').textContent=state.incidents.filter(x=>x.status==='open').length;
   document.querySelector('#m-running').textContent=state.jobs.filter(x=>['pending','running'].includes(x.status)).length;
-  document.querySelector('#services').innerHTML=state.services.map(s=>`<div class="row"><div class="row-head"><b>${esc(s.name)}</b><span class="badge succeeded">接入</span></div><small>${esc(s.description||'')}</small></div>`).join('')||'<div class="empty">暂无服务</div>';
-  const incidents=[...state.incidents].reverse();
+  document.querySelector('#services').innerHTML=state.services.map(s=>`<div class="row ${state.selectedService===s.id?'selected':''}" onclick="selectService(${s.id})"><div class="row-head"><b>${esc(s.name)}</b><span class="badge succeeded">接入</span></div><small>${esc(s.description||'')}</small></div>`).join('')||'<div class="empty">暂无服务</div>';
+  // 服务筛选：只看所选服务的事故/任务/日志；再点一次同一服务取消（F13 浏览器实测补充）
+  const visibleIncidents=state.selectedService?state.incidents.filter(i=>i.service_id===state.selectedService):state.incidents;
+  const incidents=[...visibleIncidents].reverse();
+  if(state.selectedIncident&&!visibleIncidents.some(i=>i.id===state.selectedIncident)){state.selectedIncident=null;state.loadedAnalysis=null;state.loadedAnalysisFor=null;state.analysisLoading=false;}
   if(!state.selectedIncident&&incidents.length)selectIncident(incidents[0].id,false);
-  document.querySelector('#incidents').innerHTML=incidents.map(i=>`<div class="row ${state.selectedIncident===i.id?'selected':''}" onclick="selectIncident(${i.id})"><div class="row-head"><b>${esc(i.title)}</b><span class="badge ${esc(i.status)}">${esc(i.status)}</span></div><small>${tm(i.created_at)} · service ${i.service_id}</small></div>`).join('')||'<div class="empty">暂无 Incident</div>';
-  document.querySelector('#jobs').innerHTML=state.jobs.map(j=>`<div class="row" onclick="selectIncident(${j.incident_id})"><div class="row-head"><b>Job #${j.id}</b><span class="badge ${j.status}">${j.status}</span></div><small>${esc(j.current_step)} · ${esc(j.detail)}</small><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div></div>`).join('')||'<div class="empty">暂无任务</div>';
-  document.querySelector('#log-count').textContent=state.logs.length;
-  document.querySelector('#logs').innerHTML=[...state.logs].reverse().map(l=>`<div class="log"><span>${tm(l.timestamp)}</span> <span class="${esc(l.level)}">${esc(l.level)}</span> [${l.service_id}] ${esc(l.message)}</div>`).join('');
+  document.querySelector('#incident-filter').textContent=state.selectedService?((state.services.find(s=>s.id===state.selectedService)?.name||'')+' 的事故'):'';
+  document.querySelector('#incidents').innerHTML=incidents.map(i=>`<div class="row ${state.selectedIncident===i.id?'selected':''}" onclick="selectIncident(${i.id})"><div class="row-head"><b>${esc(i.title)}</b><span class="badge ${esc(i.status)}">${esc(i.status)}</span></div><small>${tm(i.created_at)} · service ${i.service_id}</small></div>`).join('')||`<div class="empty">${state.selectedService?'该服务暂无事故':'暂无 Incident'}</div>`;
+  const visibleIds=new Set(visibleIncidents.map(i=>i.id));
+  document.querySelector('#jobs').innerHTML=state.jobs.filter(j=>visibleIds.has(j.incident_id)).map(j=>`<div class="row" onclick="selectIncident(${j.incident_id})"><div class="row-head"><b>Job #${j.id}</b><span class="badge ${j.status}">${j.status}</span></div><small>${esc(j.current_step)} · ${esc(j.detail)}</small><div class="job-progress"><i style="width:${progress(j.status,j.current_step)}%"></i></div></div>`).join('')||'<div class="empty">暂无任务</div>';
+  const logs=state.selectedService?state.logs.filter(l=>l.service_id===state.selectedService):state.logs;
+  document.querySelector('#log-count').textContent=logs.length;
+  document.querySelector('#logs').innerHTML=[...logs].reverse().map(l=>`<div class="log"><span>${tm(l.timestamp)}</span> <span class="${esc(l.level)}">${esc(l.level)}</span> [${l.service_id}] ${esc(l.message)}</div>`).join('')||`<div class="empty">${state.selectedService?'该服务暂无日志':'暂无日志'}</div>`;
+  if(!state.selectedIncident){if(!state.analysisLoading){document.querySelector('#diagnosis').innerHTML='<div class="empty">'+(state.selectedService?'该服务暂无事故，无法显示诊断。':'等待自动 Incident。')+'</div>';document.querySelector('#selected-label').textContent='未选择';}return;}
   const j=state.jobs.find(x=>x.incident_id===state.selectedIncident);
   // 以 run id 为准：新分析完成（run id 变化）才重新加载，旧结果不赖着（F13）
   if(j?.status==='succeeded'&&j.analysis_run_id&&!state.analysisLoading&&state.loadedAnalysisFor?.runId!==j.analysis_run_id)loadAnalysis(state.selectedIncident);
@@ -79,6 +86,7 @@ function render(){
   else if(state.selectedIncident&&!state.analysisLoading&&state.loadedAnalysisFor?.incidentId!==state.selectedIncident)renderAnalysis(null);
 }
 function selectIncident(id,load=true){analysisSeq++;state.selectedIncident=id;state.loadedAnalysis=null;state.loadedAnalysisFor=null;state.analysisLoading=false;document.querySelector('#selected-label').textContent=`Incident #${id}`;document.querySelector('#diagnosis').innerHTML='<div class="empty">加载中…</div>';if(load)loadAnalysis(id);render()}
+function selectService(id){analysisSeq++;state.selectedService=state.selectedService===id?null:id;state.selectedIncident=null;state.loadedAnalysis=null;state.loadedAnalysisFor=null;state.analysisLoading=false;document.querySelector('#selected-label').textContent='未选择';render()}
 async function loadAnalysis(id){
   const seq=++analysisSeq;state.analysisLoading=true;
   try{

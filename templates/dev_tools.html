@@ -8,8 +8,8 @@
 <script>
 const out=v=>document.querySelector('#output').textContent=typeof v==='string'?v:JSON.stringify(v,null,2);
 async function api(path,opt){const r=await fetch(path,opt);const v=await r.json();if(!r.ok)throw new Error(v.detail||r.statusText);return v}
-async function load(){const s=await api('/services');document.querySelector('#log-service').innerHTML=s.map(x=>`<option value="${x.id}">${x.name}</option>`).join('')}
-async function createService(){try{out(await api('/services',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.querySelector('#service-name').value})}));load()}catch(e){out(e.message)}}
-async function sendLogs(){const id=Number(document.querySelector('#log-service').value);const lines=document.querySelector('#log-lines').value.split('\n').filter(Boolean);for(const message of lines)await api('/logs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service_id:id,level:message.includes('ERROR')?'ERROR':'INFO',message})});out(`已发送 ${lines.length} 条日志，自动检测已启动。`)}
+async function load(selectedId){const s=await api('/services');const sel=document.querySelector('#log-service');sel.innerHTML=s.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');if(selectedId)sel.value=selectedId}
+async function createService(){try{const svc=await api('/services',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.querySelector('#service-name').value})});out(svc);load(svc.id)}catch(e){out(e.message)}}
+async function sendLogs(){const sel=document.querySelector('#log-service');const id=Number(sel.value);if(!id){out('还没有服务：请先在上方「创建服务」。');return}const name=sel.options[sel.selectedIndex]?.text||('#'+id);const lines=document.querySelector('#log-lines').value.split('\n').filter(Boolean);for(const message of lines)await api('/logs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service_id:id,level:message.includes('ERROR')?'ERROR':'INFO',message})});out(`已发送 ${lines.length} 条日志到 ${name}（服务 #${id}），自动检测已启动。`)}
 load();
 </script></body></html>
