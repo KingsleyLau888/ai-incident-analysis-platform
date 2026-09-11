@@ -8,7 +8,6 @@ from app.services.embedding_service import (
     TfidfEmbedder,
     get_cross_encoder,
     get_embedder,
-    get_last_retrieval_timing,
     get_retrieval_mode,
     get_sentence_transformer_embedder,
     two_stage_retrieve,
@@ -55,6 +54,8 @@ class SimilarIncidentRetriever:
         self.sparse_embedder = TfidfEmbedder()
         self.dense_embedder = dense_embedder
         self.fallback_reason: str | None = None
+        # F09：实例级检索计时——一次分析一个检索器实例，计时不串分析
+        self._last_timing: dict = {}
 
         # ChromaDB path
         self._vector_store: VectorStore | None = None
@@ -95,8 +96,12 @@ class SimilarIncidentRetriever:
 
     @property
     def retrieval_detail(self) -> str:
-        cross_encoder = get_cross_encoder()
-        rerank_note = f" rerank={cross_encoder.name}" if cross_encoder else ""
+        # F09：优先报告本次检索实际计时；无计时记录（chromadb 路径）退回配置标注
+        if self._last_timing:
+            rerank_note = self._timing_note()
+        else:
+            cross_encoder = get_cross_encoder()
+            rerank_note = f" rerank={cross_encoder.name}" if cross_encoder else ""
 
         if self.retrieval_mode == "chromadb":
             if self._vector_store is not None:
@@ -118,6 +123,15 @@ class SimilarIncidentRetriever:
             f"retrieval_mode={self.retrieval_mode}; "
             f"effective_retrieval_mode={self.effective_retrieval_mode}{rerank_note}"
         )
+
+    def _timing_note(self) -> str:
+        """F09：本次检索的实际计时摘要（coarse/rerank/候选数）。"""
+        note = f" coarse={self._last_timing.get('coarse_ms', 0):.0f}ms"
+        note += f"; candidates={self._last_timing.get('coarse_candidates', 0)}"
+        reranker = self._last_timing.get("reranker")
+        if reranker not in (None, "none"):
+            note += f"; rerank={reranker}({self._last_timing.get('rerank_ms', 0):.0f}ms)"
+        return note
 
     def retrieve(
         self,
@@ -189,6 +203,8 @@ class SimilarIncidentRetriever:
         ]
 
     def _rank(self, query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+        # F09：每次检索入口重置计时（chromadb 路径无计时，同样不残留旧值）
+        self._last_timing = {}
         if self._vector_store is not None:
             incident_index = {
                 incident.historical_id: index
@@ -207,6 +223,7 @@ class SimilarIncidentRetriever:
             coarse_top_k=10,
             fine_top_k=top_k,
             coarse_ranker=self._coarse_ranker(),
+            timing=self._last_timing,
         )
 
     def _coarse_ranker(self) -> TextEmbedder:

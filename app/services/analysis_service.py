@@ -31,11 +31,13 @@ from app.services.rrf import reciprocal_rank_fusion
 from app.services.runbook_retriever import (
     RunbookRetriever,
     RetrievedRunbookChunk,
+    build_runbook_query,
     serialize_retrieved_chunks,
 )
 from app.services.similar_incident_retriever import (
     SimilarIncident,
     SimilarIncidentRetriever,
+    build_similar_incident_query,
     serialize_similar_incidents,
 )
 
@@ -231,7 +233,7 @@ def analyze_incident(
             "knowledge_retrieval",
             "Rewriting queries and retrieving runbooks and similar incidents.",
         )
-        retrieved_runbook_chunks, similar_incidents, react_result, diagnosis_result = (
+        retrieved_runbook_chunks, similar_incidents, react_result, diagnosis_result, pipeline_meta = (
             _run_pipeline(
                 incident=incident,
                 service_name=service_name,
@@ -299,7 +301,7 @@ def analyze_incident(
         _persist_pipeline_trace(
             db, analysis_run.id, logs, detection, diagnosis_plan,
             retrieved_runbook_chunks, similar_incidents, diagnosis_result,
-            runbook_retriever, similar_incident_retriever, features, mode_decision,
+            runbook_retriever, similar_incident_retriever, pipeline_meta, mode_decision,
         )
 
     db.commit()
@@ -382,6 +384,9 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
         evidence_text=evidence_text,
     )
 
+    # F09：记录实际执行的查询（Trace 必须与执行一致，不靠环境推测）
+    queries_used: dict[str, list[str]] = {"runbook": [], "similar_incidents": []}
+
     # --- Multi-query Runbook Retrieval ---
     if "retrieve_runbooks" in diagnosis_plan.tool_steps:
         if len(rewritten.variants) > 1:
@@ -389,6 +394,7 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
             variant_top_k = _pipeline_variant_top_k()
             all_ranked: list[list[tuple[int, float]]] = []
             for variant in rewritten.variants:
+                queries_used["runbook"].append(variant)
                 ranked = runbook_retriever._rank(
                     variant,
                     [f"{c.source}\n{c.title}\n{c.content}" for c in runbook_retriever.chunks],
@@ -415,6 +421,13 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
                 for idx, score in top_indices
             ]
         else:
+            # F09：单查询路径同样记录实际执行的查询（与 retrieve 内部使用同一构造函数）
+            queries_used["runbook"].append(build_runbook_query(
+                incident_title=incident.title,
+                service_name=service_name,
+                evidence_logs=detection.evidence_logs,
+                issue_type=detection.issue_type,
+            ))
             retrieved_runbook_chunks = runbook_retriever.retrieve(
                 incident_title=incident.title,
                 service_name=service_name,
@@ -430,6 +443,7 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
             all_ranked: list[list[tuple[int, float]]] = []
             inc_docs = [_incident_doc(inc) for inc in similar_incident_retriever.incidents]
             for variant in rewritten.variants:
+                queries_used["similar_incidents"].append(variant)
                 ranked = similar_incident_retriever._rank(variant, inc_docs, top_k=_pipeline_variant_top_k())
                 all_ranked.append(ranked)
             fused = reciprocal_rank_fusion(all_ranked, key=lambda item: item[0], k=_pipeline_rrf_k())
@@ -446,6 +460,13 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
                 for idx, score in top_indices
             ]
         else:
+            # F09：单查询路径同样记录实际执行的查询（与 retrieve 内部使用同一构造函数）
+            queries_used["similar_incidents"].append(build_similar_incident_query(
+                incident_title=incident.title,
+                service_name=service_name,
+                issue_type=detection.issue_type,
+                evidence_logs=detection.evidence_logs,
+            ))
             similar_incidents = similar_incident_retriever.retrieve(
                 incident_title=incident.title,
                 service_name=service_name,
@@ -464,7 +485,9 @@ def _run_pipeline(   # 这是一个pipeline，首先是提取证据文本
         retrieved_runbook_chunks=retrieved_runbook_chunks,
         similar_incidents=similar_incidents,
     )
-    return retrieved_runbook_chunks, similar_incidents, None, diagnosis_result
+    # F09：改写与查询执行元数据随管道返回，Trace 依实记录
+    pipeline_meta = {"rewritten": rewritten, "queries_used": queries_used}
+    return retrieved_runbook_chunks, similar_incidents, None, diagnosis_result, pipeline_meta
 
 
 def _incident_doc(incident) -> str:
@@ -603,6 +626,26 @@ def _analysis_plan_from_result(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _diagnosis_result_detail(diagnosis_result) -> str:
+    """F09：诊断执行元数据摘要——生效 provider 与请求值对照、模型、耗时、
+    降级原因、token 用量（有则记录，无则省略）。"""
+    parts = [f"provider={diagnosis_result.provider}"]
+    if (
+        diagnosis_result.requested_provider
+        and diagnosis_result.requested_provider != diagnosis_result.provider
+    ):
+        parts.append(f"requested={diagnosis_result.requested_provider}")
+    if diagnosis_result.model:
+        parts.append(f"model={diagnosis_result.model}")
+    if diagnosis_result.duration_ms is not None:
+        parts.append(f"duration={diagnosis_result.duration_ms}ms")
+    if diagnosis_result.fallback_reason:
+        parts.append(f"fallback_reason={diagnosis_result.fallback_reason}")
+    if diagnosis_result.token_usage:
+        parts.append(f"usage={diagnosis_result.token_usage}")
+    return "; ".join(parts)
+
+
 def _persist_react_trace(
     db, analysis_run_id, react_result, logs, detection, diagnosis_result, mode_decision
 ):
@@ -625,7 +668,7 @@ def _persist_react_trace(
         steps_data.append((f"react_step_{step.step_number}", step.step_number + 1, detail))
     steps_data.append(
         ("summary_generation", len(react_result.steps) + 2,
-         f"Generated structured diagnosis; provider={diagnosis_result.provider}."))
+         f"Generated structured diagnosis; {_diagnosis_result_detail(diagnosis_result)}."))
     for step_name, step_order, detail in steps_data:
         db.add(AnalysisTrace(analysis_run_id=analysis_run_id, step_name=step_name,
                              step_order=step_order, detail=detail))
@@ -634,14 +677,18 @@ def _persist_react_trace(
 def _persist_pipeline_trace(
     db, analysis_run_id, logs, detection, diagnosis_plan,
     retrieved_runbook_chunks, similar_incidents, diagnosis_result,
-    runbook_retriever, similar_incident_retriever, features, mode_decision,
+    runbook_retriever, similar_incident_retriever, pipeline_meta, mode_decision,
 ):
-    from app.services.embedding_service import get_last_retrieval_timing
+    # F09：改写 provider 与变体、实际执行的查询都取自管道元数据（实际执行，
+    # 不靠环境推测）；检索计时来自各检索器实例（一次分析一个实例，不串）。
+    rewritten = pipeline_meta["rewritten"]
+    queries_used = pipeline_meta["queries_used"]
 
-    timing = get_last_retrieval_timing()
-    rerank_info = ""
-    if timing.get("reranker") and timing["reranker"] != "none":
-        rerank_info = f" rerank={timing['reranker']}({timing.get('rerank_ms', 0):.0f}ms)"
+    def _clip(query: str) -> str:
+        return query[:120] + ("..." if len(query) > 120 else "")
+
+    runbook_queries = "; ".join(_clip(q) for q in queries_used["runbook"]) or "(no queries)"
+    incident_queries = "; ".join(_clip(q) for q in queries_used["similar_incidents"]) or "(no queries)"
 
     trace_details = {
         "log_filtering": f"Selected {len(logs)} logs for service.",
@@ -656,11 +703,22 @@ def _persist_pipeline_trace(
             f"Selected {len(detection.evidence_logs)} direct and related evidence logs."
         ),
         "analysis_mode_routing": f"selected_mode={mode_decision.mode}; reason={mode_decision.reason}.",
-        "query_rewriting": f"Query rewriting: provider={features['query_rewriting_provider']}, variants={','.join(features.get('_rewritten_variants', ['(original)']))}.",
+        "query_rewriting": (
+            f"Query rewriting: provider={rewritten.provider}; "
+            f"variants=[{'; '.join(_clip(v) for v in rewritten.variants)}]."
+        ),
         "planner_decision": f"Planner selected tool_steps={diagnosis_plan.tool_steps}.",
-        "vector_runbook_retrieval": f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks; {runbook_retriever.retrieval_detail}{rerank_info}.",
-        "similar_incident_retrieval": f"Retrieved {len(similar_incidents)} similar incidents; {similar_incident_retriever.retrieval_detail}{rerank_info}.",
-        "summary_generation": f"Generated structured diagnosis; provider={diagnosis_result.provider}.",
+        "vector_runbook_retrieval": (
+            f"Retrieved {len(retrieved_runbook_chunks)} runbook chunks; "
+            f"queries=[{runbook_queries}]; {runbook_retriever.retrieval_detail}."
+        ),
+        "similar_incident_retrieval": (
+            f"Retrieved {len(similar_incidents)} similar incidents; "
+            f"queries=[{incident_queries}]; {similar_incident_retriever.retrieval_detail}."
+        ),
+        "summary_generation": (
+            f"Generated structured diagnosis; {_diagnosis_result_detail(diagnosis_result)}."
+        ),
     }
     for index, step_name in enumerate(PIPELINE_TRACE_STEPS, start=1):
         db.add(AnalysisTrace(analysis_run_id=analysis_run_id, step_name=step_name,

@@ -1,4 +1,5 @@
 import json
+import time
 
 import httpx
 
@@ -9,6 +10,8 @@ from app.services.similar_incident_retriever import SimilarIncident
 
 
 class OpenAICompatibleClient:
+    provider_name = "openai_compatible"
+
     def __init__(
         self,
         api_key: str,
@@ -95,10 +98,19 @@ class OpenAICompatibleClient:
             "response_format": {"type": "json_object"},
             "temperature": 0,
         }
+        started = time.perf_counter()
         response = self._post(payload)
         content = response["choices"][0]["message"]["content"]
         diagnosis = StructuredDiagnosis.model_validate_json(_strip_json_fence(content))
-        return DiagnosisResult(diagnosis=diagnosis, provider="openai_compatible")
+        usage = response.get("usage")
+        return DiagnosisResult(
+            diagnosis=diagnosis,
+            provider="openai_compatible",
+            requested_provider="openai_compatible",
+            model=response.get("model") or self.model,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            token_usage=usage if isinstance(usage, dict) else None,
+        )
 
     def decide_action(self, system_prompt: str, user_prompt: str) -> dict:
         payload = {

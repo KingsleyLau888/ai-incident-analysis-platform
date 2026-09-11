@@ -1,3 +1,5 @@
+import time
+
 from app.llm.base import DiagnosisResult, RootCauseHypothesis, StructuredDiagnosis
 from app.models.log_entry import LogEntry
 from app.services.runbook_retriever import RetrievedRunbookChunk
@@ -5,6 +7,8 @@ from app.services.similar_incident_retriever import SimilarIncident
 
 
 class MockLLMClient:
+    provider_name = "mock"
+
     def diagnose(
         self,
         incident_title: str,
@@ -55,6 +59,7 @@ class MockLLMClient:
                 )
             )
 
+        started = time.perf_counter()
         diagnosis = StructuredDiagnosis(
             diagnosis_summary=(
                 f"{service_name} is showing signs of {issue_label} for incident "
@@ -68,7 +73,12 @@ class MockLLMClient:
                 f"Follow the runbook guidance associated with {issue_type}.",
             ],
         )
-        return DiagnosisResult(diagnosis=diagnosis, provider="mock")
+        return DiagnosisResult(
+            diagnosis=diagnosis,
+            provider="mock",
+            requested_provider="mock",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
 
 
 def _first_evidence_message(evidence_logs: list[LogEntry]) -> str:

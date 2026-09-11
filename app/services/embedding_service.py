@@ -234,37 +234,39 @@ def two_stage_retrieve(
     coarse_top_k: int = 10,
     fine_top_k: int = 3,
     coarse_ranker: TextEmbedder,
+    timing: dict | None = None,
 ) -> list[tuple[int, float]]:
-    """Coarse rank → optional CrossEncoder fine rank."""
+    """Coarse rank → optional CrossEncoder fine rank.
+
+    F09：*timing* 是调用方提供的计时容器（通常为检索器实例级 dict，
+    一次分析一个检索器实例，天然按分析隔离）。入口即清空——即使提前
+    返回（无重排/候选不足）也不会残留上一次检索的计时。
+    不传 timing 时退回模块级字典（兼容历史调用方）。
+    """
+    sink = timing if timing is not None else _last_retrieval_timing
+    sink.clear()
+
     started = time.perf_counter()
     coarse = coarse_ranker.rank(query, documents, top_k=coarse_top_k)
-    coarse_ms = (time.perf_counter() - started) * 1000
+    sink["coarse_ms"] = (time.perf_counter() - started) * 1000
+    sink["coarse_candidates"] = len(coarse)
+    sink["reranker"] = "none"
 
     reranker = get_cross_encoder()
-    if reranker is None:
+    if reranker is None or len(coarse) <= fine_top_k:
         return coarse[:fine_top_k]
-
-    if len(coarse) <= fine_top_k:
-        return coarse
 
     started = time.perf_counter()
     coarse_docs = [documents[idx] for idx, _ in coarse]
     fine = reranker.rerank(query, coarse_docs, top_k=fine_top_k)
-    rerank_ms = (time.perf_counter() - started) * 1000
+    sink["rerank_ms"] = (time.perf_counter() - started) * 1000
+    sink["reranker"] = reranker.name
 
     # Map back to original indices
-    result = [(coarse[idx][0], score) for idx, score in fine]
-
-    # Store timing metadata for observability (picked up by retrievers)
-    _last_retrieval_timing["coarse_ms"] = coarse_ms
-    _last_retrieval_timing["rerank_ms"] = rerank_ms
-    _last_retrieval_timing["coarse_candidates"] = len(coarse)
-    _last_retrieval_timing["reranker"] = reranker.name if reranker else "none"
-
-    return result
+    return [(coarse[idx][0], score) for idx, score in fine]
 
 
-# Module-level timing store (reset per retrieval)
+# Module-level timing store (reset per retrieval; prefer per-retriever sinks)
 _last_retrieval_timing: dict = {}
 
 

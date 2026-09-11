@@ -1,4 +1,5 @@
 ﻿import os
+import time
 from dataclasses import asdict, dataclass
 
 from app.models.log_entry import LogEntry
@@ -8,7 +9,6 @@ from app.services.embedding_service import (
     TfidfEmbedder,
     get_cross_encoder,
     get_embedder,
-    get_last_retrieval_timing,
     get_retrieval_mode,
     get_sentence_transformer_embedder,
     two_stage_retrieve,
@@ -40,6 +40,8 @@ class RunbookRetriever:
         self.sparse_embedder = TfidfEmbedder()
         self.dense_embedder = dense_embedder
         self.fallback_reason: str | None = None
+        # F09：实例级检索计时——一次分析一个检索器实例，计时不串分析
+        self._last_timing: dict = {}
 
         self._vector_store: VectorStore | None = None
         if self.retrieval_mode == "chromadb":
@@ -79,8 +81,13 @@ class RunbookRetriever:
 
     @property
     def retrieval_detail(self) -> str:
-        cross_encoder = get_cross_encoder()
-        rerank_note = f" rerank={cross_encoder.name}" if cross_encoder else ""
+        # F09：优先报告本次检索实际计时（含 coarse/rerank 与候选数）；
+        # 无计时记录（如 chromadb 路径）时退回配置视角的 rerank 标注
+        if self._last_timing:
+            rerank_note = self._timing_note()
+        else:
+            cross_encoder = get_cross_encoder()
+            rerank_note = f" rerank={cross_encoder.name}" if cross_encoder else ""
 
         if self.retrieval_mode == "chromadb":
             if self._vector_store is not None:
@@ -106,6 +113,15 @@ class RunbookRetriever:
             f"retrieval_mode={self.retrieval_mode}; "
             f"effective_retrieval_mode={self.effective_retrieval_mode}{rerank_note}"
         )
+
+    def _timing_note(self) -> str:
+        """F09：本次检索的实际计时摘要（coarse/rerank/候选数）。"""
+        note = f" coarse={self._last_timing.get('coarse_ms', 0):.0f}ms"
+        note += f"; candidates={self._last_timing.get('coarse_candidates', 0)}"
+        reranker = self._last_timing.get("reranker")
+        if reranker not in (None, "none"):
+            note += f"; rerank={reranker}({self._last_timing.get('rerank_ms', 0):.0f}ms)"
+        return note
 
     def retrieve(
         self,
@@ -170,6 +186,8 @@ class RunbookRetriever:
         top_k: int,
         issue_type: str | None = None,
     ) -> list[tuple[int, float]]:
+        # F09：每次检索入口重置计时（chromadb 路径无计时，同样不残留旧值）
+        self._last_timing = {}
         if self._vector_store is not None:
             return self._rank_with_vector_store(query, top_k, issue_type)
 
@@ -186,6 +204,7 @@ class RunbookRetriever:
                 coarse_top_k=10,
                 fine_top_k=top_k,
                 coarse_ranker=self._coarse_ranker(),
+                timing=self._last_timing,
             )
             return [(candidate_indices[index], score) for index, score in ranked]
 
@@ -196,6 +215,7 @@ class RunbookRetriever:
             coarse_top_k=10,
             fine_top_k=top_k,
             coarse_ranker=self._coarse_ranker(),
+            timing=self._last_timing,
         )
 
     def _rank_soft(
@@ -212,7 +232,11 @@ class RunbookRetriever:
         """
         penalty = _runbook_filter_soft_penalty()
         coarse_top_k = max(10, top_k * 5)
+        started = time.perf_counter()
         coarse = self._coarse_ranker().rank(query, documents, top_k=coarse_top_k)
+        self._last_timing["coarse_ms"] = (time.perf_counter() - started) * 1000
+        self._last_timing["coarse_candidates"] = len(coarse)
+        self._last_timing["reranker"] = "none"
         penalized = [
             (
                 index,
@@ -225,8 +249,11 @@ class RunbookRetriever:
         reranker = get_cross_encoder()
         if reranker is None or len(penalized) <= top_k:
             return penalized[:top_k]
+        started = time.perf_counter()
         candidate_documents = [documents[index] for index, _ in penalized]
         fine = reranker.rerank(query, candidate_documents, top_k=top_k)
+        self._last_timing["rerank_ms"] = (time.perf_counter() - started) * 1000
+        self._last_timing["reranker"] = reranker.name
         return [(penalized[candidate_index][0], score) for candidate_index, score in fine]
 
     def _rank_with_vector_store(

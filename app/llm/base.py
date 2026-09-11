@@ -25,6 +25,12 @@ class StructuredDiagnosis(BaseModel):
 class DiagnosisResult:
     diagnosis: StructuredDiagnosis
     provider: str
+    # F09：结构化执行元数据——降级时对照请求与生效后端、原因、耗时、用量
+    requested_provider: str | None = None
+    model: str | None = None
+    fallback_reason: str | None = None
+    duration_ms: int | None = None
+    token_usage: dict | None = None
 
 
 class LLMClient(Protocol):

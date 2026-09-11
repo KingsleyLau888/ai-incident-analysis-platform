@@ -199,13 +199,12 @@ P0：本地正确性/结果完整性阻断，先修；P1：可信度或持续运
   重建索引并实测 effective_mode=chromadb（169ms 查询），确认"改动 chunker 后必须 --force 重建"
   是实际约束；`--force` 可绕过数量分支，但"内容变化不通知"的自动新鲜度缺口仍存在。
 
-### F09 · P1：降级信息与 Trace 不完整
+### F09 · P1：降级信息与 Trace 不完整 — **已修复（2026-09-11）**
 
-- 证据：`app/llm/factory.py:16` 丢弃异常；`analysis_service.py:603` 使用未写入的 `_rewritten_variants`，provider 从环境推测；`embedding_service.py:268` 存全局最后计时，提前返回不刷新。
-- 后果：改写失败仍可能标为 llm；实际 queries 没记录；并发/前次重排计时可串入另一分析。Dashboard 无独立降级标签，只能读文字 Trace。**代码确认。**
-- 修改：步骤返回结构化执行元数据，记录 requested/effective mode、provider/model、fallback_reason、duration、可用的 token 用量和版本。
-- 验收：制造超时和 fallback，API、页面、报告显示一致；计时不串；queries 与实际执行一致。
-- 工作量中（模型、检索、持久化、页面）；收益高（结果可信度）。
+- 证据（历史）：`app/llm/factory.py` 丢弃异常；`analysis_service.py` 使用未写入的 `_rewritten_variants`（Trace 恒为占位符 "(original)"），改写 provider 从环境推测；`embedding_service.py` 存模块级全局最后计时，提前返回不刷新，前次/并发重排计时可串入另一分析。
+- 修改（已实施）：`DiagnosisResult` 增结构化执行元数据（requested_provider/model/fallback_reason/duration_ms/token_usage，默认 None 向后兼容）；`FallbackLLMClient` 与坏配置降级客户端记录请求后端、异常摘要（类型+压平截断）、总耗时；OpenAI 兼容客户端回传响应 model 与 usage 并计时；`two_stage_retrieve` 接受调用方 timing 容器且**入口即清空**（提前返回/无重排不残留）；两个检索器改为实例级 `_last_timing`（一次分析新建一个实例，计时不串分析），retrieval_detail 输出实际计时；`_run_pipeline` 返回 pipeline_meta（实际改写 provider + 变体 + 逐步骤实际执行的查询，单查询路径用与 retriever 相同的查询构造函数）；Trace 的 query_rewriting / 两个 retrieval / summary_generation 步骤全部按实际执行记录。
+- 验收：新增 tests/test_f09_trace_and_fallback.py 10 项（降级元数据、成功透传、坏配置降级、OpenAI 元数据、计时 sink 入口重置、重排计时、实例级隔离、Trace 实际查询与改写 provider、summary 降级元数据、多查询/单查询实录）；全套 193 passed；旧代码反向验证 10/10 失败；真实服务冒烟（`LLM_PROVIDER=openai_compatible` + 不可达地址）：Trace summary_generation 显示 `provider=mock_fallback; requested=openai_compatible; model=smoke-model; duration=1309ms; fallback_reason=HTTPStatusError…`，query_rewriting 显示实际 variants 与 `provider=template`（"(original)" 占位符不再出现），retrieval 步骤 queries 与实际执行一致（冒烟数据已清理）。
+- 遗留：token 用量仅在 API 返回时记录；真实模型降级（超时/限流）未实测（需真实 API，属 F10/F12）；Dashboard 无独立降级标签（文字 Trace 已含全部信息，独立标签属展示增强）。
 
 ### F10 · P1：JSON 合法不等于诊断有依据
 
