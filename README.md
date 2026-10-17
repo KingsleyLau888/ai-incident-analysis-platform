@@ -6,6 +6,8 @@
 
 当前项目不是完整生产级 AIOps 平台，也不是 fully autonomous Agent。它更准确的定位是：一个可运行、可评测、可展示的 Incident Analysis Pipeline，包含规则检测、证据日志、Runbook RAG、相似历史事故检索、可插拔 LLM 结构化诊断、Trace 和 Eval Harness。
 
+理解项目或准备面试，可先读 [项目复习笔记](docs/PROJECT_STUDY_NOTES_20261015.md)，再用 [自测题](docs/PROJECT_STUDY_QUIZ_20261015.md) 检查掌握程度；实际调用关系见 [项目流程导读](docs/PROJECT_FLOW_GUIDE.md)。
+
 ## 核心能力
 
 - 日志接入：业务系统通过 API / logging handler 把日志发送到平台。
